@@ -1,5 +1,7 @@
 import { get, list } from "@vercel/blob";
 
+const PUBLIC_BLOB_TOKEN = process.env.PUBLIC_BLOB_READ_WRITE_TOKEN!;
+
 function jsonError(message: string, status = 400) {
   return new Response(
     JSON.stringify({
@@ -16,8 +18,11 @@ function jsonError(message: string, status = 400) {
   );
 }
 
-async function readPublicJson(pathname: string) {
-  const result = await get(pathname, { access: "Public" });
+async function readJson(pathname: string) {
+  const result = await get(pathname, {
+    access: "public",
+    token: PUBLIC_BLOB_TOKEN,
+  });
 
   if (!result || result.statusCode !== 200 || !result.stream) {
     return null;
@@ -30,6 +35,7 @@ export async function GET() {
   try {
     const { blobs } = await list({
       prefix: "processed/",
+      token: PUBLIC_BLOB_TOKEN,
     });
 
     const candidates = blobs.filter((blob) => blob.pathname.endsWith(".json"));
@@ -38,13 +44,11 @@ export async function GET() {
       return jsonError("No processed dashboard data found yet.", 404);
     }
 
-    const newest = [...candidates].sort((a, b) => {
-      return (
-        new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
-      );
-    })[0];
+    const newest = [...candidates].sort(
+      (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+    )[0];
 
-    const data = await readPublicJson(newest.pathname);
+    const data = await readJson(newest.pathname);
 
     if (!data) {
       return jsonError("Could not read the latest processed dataset.", 500);
