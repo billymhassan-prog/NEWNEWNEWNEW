@@ -46,48 +46,56 @@ export default function UploadModal({ isOpen, onClose }: UploadModalProps) {
     }
   };
 
-  const handleUpload = async () => {
-    if (!file) return;
+const handleUpload = async () => {
+  if (!file) return;
 
-    setUploading(true);
-    setUploaded(false);
-    setUploadError(null);
-    setProgress(0);
+  setUploading(true);
+  setUploaded(false);
+  setUploadError(null);
+  setProgress(0);
 
-    try {
-      const uploadedBlob = await upload(file.name, file, {
-        access: "Public",
-        handleUploadUrl: "/api/upload",
-        onUploadProgress: (event) => {
-          setProgress(Math.round(event.percentage));
-        },
-      });
+  try {
+    const uploadedBlob = await upload(file.name, file, {
+      access: "public",
+      handleUploadUrl: "/api/upload",
+      onUploadProgress: (event) => {
+        setProgress(Math.round(event.percentage));
+      },
+    });
 
-      const analyzeResp = await fetch("/api/analyze", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          pathname: uploadedBlob.pathname,
-          fileName: file.name,
-        }),
-      });
+    const analyzeResp = await fetch("/api/analyze", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        pathname: uploadedBlob.pathname,
+        fileName: file.name,
+      }),
+    });
 
-      const analyzeJson = await analyzeResp.json();
+    const analyzeJson = await analyzeResp.json();
 
-      if (!analyzeResp.ok || !analyzeJson.success) {
-        throw new Error(analyzeJson.error || "Analyze failed");
-      }
+    if (!analyzeResp.ok || !analyzeJson.success) {
+      throw new Error(analyzeJson.error || "Analyze failed");
+    }
 
-      setUploaded(true);
-      setProgress(100);
+    setUploaded(true);
+    setProgress(100);
 
-      window.dispatchEvent(
-        new CustomEvent("data:updated", {
-          detail: { version: analyzeJson.version },
-        })
-      );
+    window.dispatchEvent(
+      new CustomEvent("data:updated", {
+        detail: { version: analyzeJson.version },
+      })
+    );
+  } catch (err: any) {
+    console.error("Upload error:", err);
+    setUploadError(err?.message || "Upload failed");
+    setProgress(null);
+  } finally {
+    setUploading(false);
+  }
+};
     } catch (err: any) {
       console.error("Upload error:", err);
       setUploadError(err?.message || "Upload failed");
