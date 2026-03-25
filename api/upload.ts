@@ -1,5 +1,7 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 
+const PUBLIC_BLOB_TOKEN = process.env.PUBLIC_BLOB_READ_WRITE_TOKEN!;
+
 const ALLOWED_EXTENSIONS = [".xlsx", ".xls", ".csv"];
 const ALLOWED_CONTENT_TYPES = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -19,6 +21,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as HandleUploadBody;
 
     const jsonResponse = await handleUpload({
+      token: PUBLIC_BLOB_TOKEN,
       body,
       request,
       onBeforeGenerateToken: async (pathname) => {
