@@ -24,6 +24,8 @@
     "recharts": "^2.15.0",
     "styletron-engine-monolithic": "^1.0.0",
     "styletron-react": "^6.1.1"
+    "@vercel/blob": "^1.0.0",
+"xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
