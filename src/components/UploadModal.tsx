@@ -1,4 +1,5 @@
 // src/components/UploadModal.tsx  (or wherever your modal lives)
+import { upload } from "@vercel/blob/client";
 import { useStyletron } from "baseui";
 import { useState, useRef } from "react";
 import { Modal, ModalHeader, ModalBody, ModalFooter, ModalButton } from "baseui/modal";
