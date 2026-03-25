@@ -53,6 +53,8 @@ const asNum = (value: any) => Number(value) || 0;
 const pct = (part: number, total: number) => (total > 0 ? (part / total) * 100 : 0);
 const firstName = (fullName: string) => fullName.split(" ")[0] || fullName;
 const fmt = (n: number) => Math.round(n).toLocaleString();
+const safePct0 = (value: any) => asNum(value).toFixed(0);
+const safePct1 = (value: any) => asNum(value).toFixed(1);
 
 function getPrimaryCoachingArea(signal: {
   isRamping: boolean;
@@ -72,7 +74,10 @@ function getPrimaryCoachingArea(signal: {
   return "Maintain / Scale";
 }
 
-function getSecondaryCoachingArea(primary: string, signal: { calls: number; pct: number; stale: number; pctNFT: number }) {
+function getSecondaryCoachingArea(
+  primary: string,
+  signal: { calls: number; pct: number; stale: number; pctNFT: number }
+) {
   if (primary === "Pipeline Creation") return signal.calls < 250 ? "Activity" : "Pipeline Hygiene";
   if (primary === "Activity") return signal.pct < 80 ? "Conversion / Quality" : "Pipeline Creation";
   if (primary === "Post-Close Follow Through") return "Hygiene";
@@ -195,7 +200,7 @@ function buildCoachingThemes(signals: RepSignal[], teamActual: ReturnType<typeof
   if (teamActual.teamPct < 100) {
     themes.push({
       title: "Close the Q1 attainment gap",
-      why: `Team is at ${teamActual.teamPct.toFixed(0)}% to quota and short ${fmt(teamActual.gap)} points.`,
+      why: `Team is at ${safePct0(teamActual.teamPct)}% to quota and short ${fmt(teamActual.gap)} points.`,
       actions: [
         `Coach ${lowAttainment.map((r) => firstName(r.name)).join(", ") || "the bottom cohort"} first.`,
         "Tie each rep to a weekly points target and one concrete deal move.",
@@ -218,10 +223,10 @@ function buildCoachingThemes(signals: RepSignal[], teamActual: ReturnType<typeof
     });
   }
 
-  if ((teamCWnFT.pctNFT || 0) >= 10 || postCloseRisk.length > 0) {
+  if ((asNum(teamCWnFT.pctNFT) || 0) >= 10 || postCloseRisk.length > 0) {
     themes.push({
       title: "Tighten post-close follow-through",
-      why: `${teamCWnFT.cwnft} deals are closed but not yet live (${teamCWnFT.pctNFT}% CWnFT rate).`,
+      why: `${asNum(teamCWnFT.cwnft)} deals are closed but not yet live (${safePct0(teamCWnFT.pctNFT)}% CWnFT rate).`,
       actions: [
         `Review post-close handoff with ${postCloseRisk.map((r) => firstName(r.name)).join(", ") || "the reps with open CWs"}.`,
         "Set a same-week live date expectation on every new close.",
@@ -234,7 +239,7 @@ function buildCoachingThemes(signals: RepSignal[], teamActual: ReturnType<typeof
   if (lowActivity.length > 0) {
     themes.push({
       title: "Raise activity where volume is light",
-      why: `Some reps are below the activity floor and need a stronger habit plan.`,
+      why: "Some reps are below the activity floor and need a stronger habit plan.",
       actions: [
         `Coach ${lowActivity.map((r) => firstName(r.name)).join(", ")} on daily call blocks and talk track discipline.`,
         "Use a daily activity target for the lowest-volume reps.",
@@ -321,7 +326,7 @@ function generateAlerts(teamMembers: any[]): Alert[] {
         alerts.push({
           severity: "critical",
           emoji: "🚨",
-          title: `${firstName(r.name)} at ${((asNum(r.pctToQuota) || pct(asNum(r.currentPts), asNum(r.quota)))).toFixed(0)}% to quota`,
+          title: `${firstName(r.name)} at ${safePct0(asNum(r.pctToQuota) || pct(asNum(r.currentPts), asNum(r.quota)))}% to quota`,
           detail: `Needs ${asNum(r.extraPointsNeeded)} more pts.`,
           rep: r.name,
         });
@@ -333,7 +338,7 @@ function generateAlerts(teamMembers: any[]): Alert[] {
       alerts.push({
         severity: "warning",
         emoji: "🔄",
-        title: `${firstName(r.name)} CWnFT at ${asNum(r.pctNFT).toFixed(0)}%`,
+        title: `${firstName(r.name)} CWnFT at ${safePct0(r.pctNFT)}%`,
         detail: `${asNum(r.cwnft)} of ${asNum(r.totalCW)} deals not yet live.`,
         rep: r.name,
       });
@@ -423,11 +428,23 @@ export default function ManagerHub() {
 
   const summaryCards = useMemo(
     () => [
-      { label: "Q1 Attainment", value: `${teamActual.teamPct.toFixed(0)}%`, tone: teamActual.teamPct >= 100 ? "#05944F" : teamActual.teamPct >= 90 ? "#EA8600" : "#E11900" },
+      {
+        label: "Q1 Attainment",
+        value: `${safePct0(teamActual.teamPct)}%`,
+        tone: teamActual.teamPct >= 100 ? "#05944F" : teamActual.teamPct >= 90 ? "#EA8600" : "#E11900",
+      },
       { label: "Gap to Quota", value: fmt(teamActual.gap), tone: teamActual.gap === 0 ? "#05944F" : "#E11900" },
       { label: "L12D Calls", value: fmt(teamHealth.calls) },
-      { label: "Stale Opps", value: fmt(teamHealth.staleOpps), tone: teamHealth.staleOpps >= 20 ? "#E11900" : teamHealth.staleOpps >= 10 ? "#EA8600" : "#333" },
-      { label: "CWnFT Rate", value: `${teamHealth.teamCwnftRate.toFixed(0)}%`, tone: teamHealth.teamCwnftRate >= 15 ? "#E11900" : teamHealth.teamCwnftRate >= 10 ? "#EA8600" : "#05944F" },
+      {
+        label: "Stale Opps",
+        value: fmt(teamHealth.staleOpps),
+        tone: teamHealth.staleOpps >= 20 ? "#E11900" : teamHealth.staleOpps >= 10 ? "#EA8600" : "#333",
+      },
+      {
+        label: "CWnFT Rate",
+        value: `${safePct0(teamHealth.teamCwnftRate)}%`,
+        tone: teamHealth.teamCwnftRate >= 15 ? "#E11900" : teamHealth.teamCwnftRate >= 10 ? "#EA8600" : "#05944F",
+      },
     ],
     [teamActual, teamHealth]
   );
@@ -484,7 +501,9 @@ export default function ManagerHub() {
     if (topPriorityRep) {
       prompts.push({
         label: `🎯 Coach ${firstName(topPriorityRep.name)} first`,
-        prompt: `Coach ${topPriorityRep.name}. Their primary issue is ${topPriorityRep.primary} and their secondary issue is ${topPriorityRep.secondary}. They are at ${topPriorityRep.pct.toFixed(0)}% to quota, have ${topPriorityRep.calls} calls, ${topPriorityRep.stale} stale opps, and ${topPriorityRep.pctNFT.toFixed(0)}% CWnFT. Give me 3 coaching actions and a short talk track.`,
+        prompt: `Coach ${topPriorityRep.name}. Their primary issue is ${topPriorityRep.primary} and their secondary issue is ${topPriorityRep.secondary}. They are at ${safePct0(
+          topPriorityRep.pct
+        )}% to quota, have ${topPriorityRep.calls} calls, ${topPriorityRep.stale} stale opps, and ${safePct0(topPriorityRep.pctNFT)}% CWnFT. Give me 3 coaching actions and a short talk track.`,
         urgent: true,
       });
     }
@@ -504,7 +523,7 @@ export default function ManagerHub() {
     if (teamActual.teamPct < 100) {
       prompts.push({
         label: "⚡ Close the quota gap",
-        prompt: `We are at ${teamActual.teamPct.toFixed(0)}% to quota and short ${fmt(teamActual.gap)} points. Give me a tactical plan to close the gap with the fewest high-confidence actions.`,
+        prompt: `We are at ${safePct0(teamActual.teamPct)}% to quota and short ${fmt(teamActual.gap)} points. Give me a tactical plan to close the gap with the fewest high-confidence actions.`,
         urgent: true,
       });
     }
@@ -512,7 +531,7 @@ export default function ManagerHub() {
     if (teamHealth.teamCwnftRate >= 10) {
       prompts.push({
         label: `🔄 Fix CWnFT`,
-        prompt: `Our CWnFT rate is ${teamHealth.teamCwnftRate.toFixed(0)}% with ${teamHealth.teamCwnftCount} deals not yet live. What are the best coaching actions to improve post-close follow-through?`,
+        prompt: `Our CWnFT rate is ${safePct0(teamHealth.teamCwnftRate)}% with ${teamHealth.teamCwnftCount} deals not yet live. What are the best coaching actions to improve post-close follow-through?`,
       });
     }
 
@@ -528,12 +547,8 @@ export default function ManagerHub() {
 
   return (
     <div>
-      <SectionHeader
-        title="Manager Hub"
-        subtitle="A coaching cockpit for insights, priorities, and action planning."
-      />
+      <SectionHeader title="Manager Hub" subtitle="A coaching cockpit for insights, priorities, and action planning." />
 
-      {/* Direction banner */}
       <div
         className={css({
           backgroundColor: "#0B1220",
@@ -551,7 +566,7 @@ export default function ManagerHub() {
       >
         <div>
           <div className={css({ fontSize: "12px", opacity: 0.75, marginBottom: "6px", textTransform: "uppercase", letterSpacing: "0.06em" })}>
-            Today&apos;s coaching direction
+            Today's coaching direction
           </div>
           <div className={css({ fontSize: "18px", fontFamily: "UberMove", fontWeight: 700, marginBottom: "6px" })}>
             {topTheme?.title || "Coach the biggest business risk first"}
@@ -599,7 +614,6 @@ export default function ManagerHub() {
         </div>
       </div>
 
-      {/* KPI row */}
       <div
         className={css({
           display: "grid",
@@ -618,17 +632,12 @@ export default function ManagerHub() {
               padding: "16px",
             })}
           >
-            <div className={css({ fontSize: "11px", fontFamily: "UberMoveText", color: "#888", marginBottom: "6px" })}>
-              {card.label}
-            </div>
-            <div className={css({ fontSize: "24px", fontFamily: "UberMove", fontWeight: 700, color: card.tone || "#111" })}>
-              {card.value}
-            </div>
+            <div className={css({ fontSize: "11px", fontFamily: "UberMoveText", color: "#888", marginBottom: "6px" })}>{card.label}</div>
+            <div className={css({ fontSize: "24px", fontFamily: "UberMove", fontWeight: 700, color: card.tone || "#111" })}>{card.value}</div>
           </div>
         ))}
       </div>
 
-      {/* Condensed smart alerts */}
       <div
         className={css({
           backgroundColor: "#FFF",
@@ -754,7 +763,6 @@ export default function ManagerHub() {
         )}
       </div>
 
-      {/* Main grid */}
       <div
         className={css({
           display: "grid",
@@ -764,7 +772,6 @@ export default function ManagerHub() {
           marginBottom: "20px",
         })}
       >
-        {/* Left: actual attainment */}
         <div
           className={css({
             backgroundColor: "#FFF",
@@ -791,7 +798,7 @@ export default function ManagerHub() {
                 fontWeight: 700,
               })}
             >
-              {teamActual.teamPct.toFixed(0)}% to quota
+              {safePct0(teamActual.teamPct)}% to quota
             </div>
           </div>
 
@@ -801,7 +808,7 @@ export default function ManagerHub() {
                 key={r.name}
                 onClick={() =>
                   runPrompt(
-                    `Coach ${r.name}. They are at ${r.pctToQuota.toFixed(0)}% to quota, gap ${fmt(r.gap)} points, and need ${fmt(
+                    `Coach ${r.name}. They are at ${safePct0(r.pctToQuota)}% to quota, gap ${fmt(r.gap)} points, and need ${fmt(
                       r.extraPointsNeeded
                     )} more points. Build a manager-ready coaching plan with talk track, actions, and what I should inspect next.`
                   )
@@ -830,8 +837,17 @@ export default function ManagerHub() {
                       })}
                     />
                   </div>
-                  <span className={css({ width: "54px", textAlign: "right", fontSize: "12px", fontFamily: "UberMoveText", fontWeight: 700, color: r.pctToQuota >= 100 ? "#05944F" : "#E11900" })}>
-                    {r.pctToQuota.toFixed(0)}%
+                  <span
+                    className={css({
+                      width: "54px",
+                      textAlign: "right",
+                      fontSize: "12px",
+                      fontFamily: "UberMoveText",
+                      fontWeight: 700,
+                      color: r.pctToQuota >= 100 ? "#05944F" : "#E11900",
+                    })}
+                  >
+                    {safePct0(r.pctToQuota)}%
                   </span>
                   <span className={css({ width: "84px", textAlign: "right", fontSize: "11px", fontFamily: "UberMoveText", color: "#666" })}>
                     {fmt(r.currentPts)}/{fmt(r.quota)}
@@ -839,7 +855,7 @@ export default function ManagerHub() {
                 </div>
                 <div className={css({ display: "flex", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" })}>
                   <div className={css({ fontSize: "11px", color: "#666", fontFamily: "UberMoveText" })}>
-                    Gap: <b>{fmt(r.gap)}</b> pts · Req/wk: <b>{r.reqPtsPerWk ? r.reqPtsPerWk.toFixed(1) : "—"}</b>
+                    Gap: <b>{fmt(r.gap)}</b> pts · Req/wk: <b>{r.reqPtsPerWk ? safePct1(r.reqPtsPerWk) : "—"}</b>
                   </div>
                   <div className={css({ display: "flex", gap: "8px", flexWrap: "wrap" })}>
                     <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#E8F0FE", color: "#1565C0" })}>
@@ -852,7 +868,7 @@ export default function ManagerHub() {
                       {r.stale} stale
                     </span>
                     <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#FCE7F3", color: "#BE185D" })}>
-                      {r.pctNFT.toFixed(0)}% CWnFT
+                      {safePct0(r.pctNFT)}% CWnFT
                     </span>
                   </div>
                 </div>
@@ -861,7 +877,6 @@ export default function ManagerHub() {
           </div>
         </div>
 
-        {/* Right: coaching themes + AI */}
         <div className={css({ display: "grid", gap: "20px" })}>
           <div
             className={css({
@@ -871,9 +886,7 @@ export default function ManagerHub() {
               padding: "20px",
             })}
           >
-            <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "16px", marginBottom: "4px" })}>
-              🧠 Coaching themes
-            </div>
+            <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "16px", marginBottom: "4px" })}>🧠 Coaching themes</div>
             <div className={css({ fontSize: "12px", color: "#777", fontFamily: "UberMoveText", marginBottom: "14px" })}>
               These are the manager-level themes the tab should drive.
             </div>
@@ -897,9 +910,7 @@ export default function ManagerHub() {
                       </span>
                     )}
                   </div>
-                  <div className={css({ fontSize: "12px", color: "#666", fontFamily: "UberMoveText", lineHeight: 1.5, marginBottom: "10px" })}>
-                    {theme.why}
-                  </div>
+                  <div className={css({ fontSize: "12px", color: "#666", fontFamily: "UberMoveText", lineHeight: 1.5, marginBottom: "10px" })}>{theme.why}</div>
                   <ul className={css({ margin: 0, paddingLeft: "18px", display: "grid", gap: "6px" })}>
                     {theme.actions.map((action, j) => (
                       <li key={j} className={css({ fontSize: "12px", color: "#333", fontFamily: "UberMoveText", lineHeight: 1.5 })}>
@@ -913,7 +924,17 @@ export default function ManagerHub() {
 
             {actionItems.length > 0 && (
               <div className={css({ marginTop: "14px", paddingTop: "14px", borderTop: "1px solid #E8E8E8" })}>
-                <div className={css({ fontFamily: "UberMoveText", fontWeight: 700, fontSize: "12px", color: "#666", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.04em" })}>
+                <div
+                  className={css({
+                    fontFamily: "UberMoveText",
+                    fontWeight: 700,
+                    fontSize: "12px",
+                    color: "#666",
+                    marginBottom: "8px",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.04em",
+                  })}
+                >
                   Team action items
                 </div>
                 <div className={css({ display: "grid", gap: "8px" })}>
@@ -946,9 +967,7 @@ export default function ManagerHub() {
               padding: "20px",
             })}
           >
-            <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "16px", marginBottom: "4px" })}>
-              🤖 AI Manager Coach
-            </div>
+            <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "16px", marginBottom: "4px" })}>🤖 AI Manager Coach</div>
             <div className={css({ fontSize: "12px", color: "#777", fontFamily: "UberMoveText", marginBottom: "12px" })}>
               Ask for themes, action plans, rep coaching talk tracks, or staff-meeting bullets.
             </div>
@@ -998,9 +1017,7 @@ export default function ManagerHub() {
             </div>
 
             {aiError && (
-              <div className={css({ color: "#E11900", fontSize: "12px", fontFamily: "UberMoveText", marginBottom: "8px" })}>
-                {aiError}
-              </div>
+              <div className={css({ color: "#E11900", fontSize: "12px", fontFamily: "UberMoveText", marginBottom: "8px" })}>{aiError}</div>
             )}
 
             {aiResponse ? (
@@ -1036,7 +1053,6 @@ export default function ManagerHub() {
         </div>
       </div>
 
-      {/* Priority coaching queue */}
       <div
         className={css({
           backgroundColor: "#FFF",
@@ -1047,9 +1063,7 @@ export default function ManagerHub() {
       >
         <div className={css({ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", marginBottom: "6px" })}>
           <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "16px" })}>🚦 Priority coaching queue</div>
-          <div className={css({ fontSize: "12px", color: "#777", fontFamily: "UberMoveText" })}>
-            Rank reps by urgency and coach from the top down.
-          </div>
+          <div className={css({ fontSize: "12px", color: "#777", fontFamily: "UberMoveText" })}>Rank reps by urgency and coach from the top down.</div>
         </div>
 
         <div className={css({ display: "grid", gap: "10px" })}>
@@ -1070,7 +1084,7 @@ export default function ManagerHub() {
               <div>
                 <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "14px", marginBottom: "4px" })}>{rep.name}</div>
                 <div className={css({ fontSize: "11px", color: "#666", fontFamily: "UberMoveText" })}>
-                  {rep.pct.toFixed(0)}% to quota · {fmt(rep.gap)} gap
+                  {safePct0(rep.pct)}% to quota · {fmt(rep.gap)} gap
                 </div>
               </div>
 
@@ -1084,7 +1098,16 @@ export default function ManagerHub() {
                   </span>
                 </div>
                 <div className={css({ fontSize: "12px", color: "#333", fontFamily: "UberMoveText", lineHeight: 1.5 })}>
-                  <b>Coach next:</b> {rep.primary === "Pipeline Creation" ? "Create new opportunities and clean stale ones." : rep.primary === "Post-Close Follow Through" ? "Force a clear live date and handoff ownership." : rep.primary === "Activity" ? "Increase call volume and tighten the talk track." : rep.primary === "Ramp / New Hire" ? "Reinforce daily habits and shadowing." : "Focus on deal quality and move next steps."}
+                  <b>Coach next:</b>{" "}
+                  {rep.primary === "Pipeline Creation"
+                    ? "Create new opportunities and clean stale ones."
+                    : rep.primary === "Post-Close Follow Through"
+                      ? "Force a clear live date and handoff ownership."
+                      : rep.primary === "Activity"
+                        ? "Increase call volume and tighten the talk track."
+                        : rep.primary === "Ramp / New Hire"
+                          ? "Reinforce daily habits and shadowing."
+                          : "Focus on deal quality and move next steps."}
                 </div>
                 <div className={css({ display: "flex", gap: "8px", flexWrap: "wrap" })}>
                   <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#F8F9FA", color: "#444" })}>
@@ -1097,7 +1120,7 @@ export default function ManagerHub() {
                     {rep.stale} stale
                   </span>
                   <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#F8F9FA", color: "#444" })}>
-                    {rep.pctNFT.toFixed(0)}% CWnFT
+                    {safePct0(rep.pctNFT)}% CWnFT
                   </span>
                 </div>
               </div>
@@ -1108,9 +1131,9 @@ export default function ManagerHub() {
                   kind={KIND.secondary}
                   onClick={() =>
                     runPrompt(
-                      `Coach ${rep.name}. Their primary issue is ${rep.primary} and secondary issue is ${rep.secondary}. They are at ${rep.pct.toFixed(
-                        0
-                      )}% to quota, have ${rep.calls} calls, ${rep.stale} stale opps, and ${rep.pctNFT.toFixed(0)}% CWnFT. Give me 3 action items and a short talk track.`
+                      `Coach ${rep.name}. Their primary issue is ${rep.primary} and secondary issue is ${rep.secondary}. They are at ${safePct0(
+                        rep.pct
+                      )}% to quota, have ${rep.calls} calls, ${rep.stale} stale opps, and ${safePct0(rep.pctNFT)}% CWnFT. Give me 3 action items and a short talk track.`
                     )
                   }
                 >
