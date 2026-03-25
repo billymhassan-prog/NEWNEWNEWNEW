@@ -1,1 +1,59 @@
+import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 
+const ALLOWED_EXTENSIONS = [".xlsx", ".xls", ".csv"];
+const ALLOWED_CONTENT_TYPES = [
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "text/csv",
+  "application/csv",
+  "application/octet-stream", // some browsers use this for spreadsheet uploads
+];
+
+function hasAllowedExtension(pathname: string): boolean {
+  const lower = pathname.toLowerCase();
+  return ALLOWED_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+export async function POST(request: Request) {
+  try {
+    const body = (await request.json()) as HandleUploadBody;
+
+    const jsonResponse = await handleUpload({
+      body,
+      request,
+      onBeforeGenerateToken: async (pathname) => {
+        if (!hasAllowedExtension(pathname)) {
+          throw new Error("Only .xlsx, .xls, and .csv files are allowed.");
+        }
+
+        return {
+          allowedContentTypes: ALLOWED_CONTENT_TYPES,
+          addRandomSuffix: true,
+          tokenPayload: JSON.stringify({
+            purpose: "team-dashboard-upload",
+          }),
+        };
+      },
+      onUploadCompleted: async ({ blob, tokenPayload }) => {
+        console.log("Upload completed:", {
+          pathname: blob.pathname,
+          size: blob.size,
+          contentType: blob.contentType,
+          tokenPayload,
+        });
+      },
+    });
+
+    return Response.json(jsonResponse);
+  } catch (error: any) {
+    console.error("UPLOAD TOKEN ERROR:", error);
+
+    return Response.json(
+      {
+        success: false,
+        error: error?.message || "Could not start upload.",
+      },
+      { status: 400 }
+    );
+  }
+}
