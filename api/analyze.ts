@@ -96,7 +96,7 @@ export async function POST(request: Request) {
       return jsonError("pathname is required.");
     }
 
-    const blobResult = await get(pathname, { access: "private" });
+    const blobResult = await get(pathname, { access: "Public" });
 
     if (!blobResult || blobResult.statusCode !== 200 || !blobResult.stream) {
       return jsonError("Uploaded file not found.", 404);
@@ -128,7 +128,7 @@ export async function POST(request: Request) {
     };
 
     await put(processedPathname, JSON.stringify(processedPayload, null, 2), {
-      access: "private",
+      access: "Public",
       addRandomSuffix: false,
       contentType: "application/json",
     });
