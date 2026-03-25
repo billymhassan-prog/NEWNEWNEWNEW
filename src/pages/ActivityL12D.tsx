@@ -1,303 +1,1120 @@
-import { useState } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useStyletron } from "baseui";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, CartesianGrid, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Legend, ReferenceLine } from "recharts";
-import { Modal, ModalHeader, ModalBody } from "baseui/modal";
-import { MetricCard, SectionHeader, InsightCard, ProgressBar, CollapsibleInsights, pctColor } from "../components/SharedUI";
-import { repL12DActivity, l12dDates, teamL12DActivity, repL12WActivity, l12wWeeks, RepName } from "../data/dashboardData";
 import { Button, SIZE, KIND } from "baseui/button";
-import { useThresholds } from "../context/ThresholdsContext";
+import { Textarea } from "baseui/textarea";
+import { SectionHeader } from "../components/SharedUI";
+import {
+  repAttainment,
+  repPipeline,
+  repL12DActivity,
+  repCWnFT,
+  teamCWnFT,
+} from "../data/dashboardData";
+import { buildManagerAdvisorMarkdown } from "../utils/localInsights";
+import { loadTeamMembers } from "../utils/teamRoster";
+import ReactMarkdown from "react-markdown";
 
-export default function ActivityL12D({ selectedRep }: { selectedRep: RepName | 'all' }) {
-  const [css] = useStyletron();
-  const [radarRep, setRadarRep] = useState<string | null>(null);
-  const [wowPeriod, setWowPeriod] = useState<1 | 2 | 3 | 4 | 'mom'>(1);
+interface Alert {
+  severity: "critical" | "warning" | "info";
+  emoji: string;
+  title: string;
+  detail: string;
+  rep?: string;
+}
 
-  const reps = selectedRep === 'all' ? repL12DActivity : repL12DActivity.filter(r => r.name === selectedRep);
-  const { thresholds } = useThresholds();
-  const numReps = repL12DActivity.length;
-  const teamAvgCalls = teamL12DActivity.totalCalls / numReps;
-  const teamAvgTP = teamL12DActivity.totalTouchpoints / numReps;
+interface RepSignal {
+  name: string;
+  currentPts: number;
+  quota: number;
+  pct: number;
+  gap: number;
+  calls: number;
+  talkTime: number;
+  openOpps: number;
+  stale: number;
+  createdLW: number;
+  totalCW: number;
+  cwnft: number;
+  pctNFT: number;
+  isRamping: boolean;
+  primary: string;
+  secondary: string;
+  score: number;
+}
 
-  // Daily targets — team = daily × numReps, individual = daily
-  const dailyCallTarget = selectedRep === 'all' ? thresholds.dailyDials * numReps : thresholds.dailyDials;
-  const dailyTPTarget = selectedRep === 'all' ? thresholds.dailyTouchpoints * numReps : thresholds.dailyTouchpoints;
+interface CoachingTheme {
+  title: string;
+  why: string;
+  actions: string[];
+  focusRep?: string;
+}
 
-  const callLeaderboard = [...reps].sort((a, b) => b.totalCalls - a.totalCalls);
+const asNum = (value: any) => Number(value) || 0;
+const pct = (part: number, total: number) => (total > 0 ? (part / total) * 100 : 0);
+const firstName = (fullName: string) => fullName.split(" ")[0] || fullName;
+const fmt = (n: number) => Math.round(n).toLocaleString();
+const safePct0 = (value: any) => asNum(value).toFixed(0);
+const safePct1 = (value: any) => asNum(value).toFixed(1);
 
-  const dailyTrend = l12dDates.map((d, i) => {
-    const obj: Record<string, string | number> = { name: d };
-    if (selectedRep === 'all') {
-      obj.calls = teamL12DActivity.dailyCalls[i];
-      obj.touchpoints = teamL12DActivity.dailyTouchpoints[i];
-    } else {
-      const rep = reps[0];
-      obj.calls = rep.calls[i];
-      obj.touchpoints = rep.touchpoints[i];
+function getPrimaryCoachingArea(signal: {
+  isRamping: boolean;
+  pctNFT: number;
+  stale: number;
+  createdLW: number;
+  calls: number;
+  pct: number;
+  openOpps: number;
+}) {
+  if (signal.isRamping) return "Ramp / New Hire";
+  if (signal.pctNFT >= 15) return "Post-Close Follow Through";
+  if (signal.stale >= 15 || signal.createdLW < 3) return "Pipeline Creation";
+  if (signal.calls < 250) return "Activity";
+  if (signal.pct < 80) return "Conversion / Quality";
+  if (signal.openOpps < 5) return "Pipeline Coverage";
+  return "Maintain / Scale";
+}
+
+function getSecondaryCoachingArea(
+  primary: string,
+  signal: { calls: number; pct: number; stale: number; pctNFT: number }
+) {
+  if (primary === "Pipeline Creation") return signal.calls < 250 ? "Activity" : "Pipeline Hygiene";
+  if (primary === "Activity") return signal.pct < 80 ? "Conversion / Quality" : "Pipeline Creation";
+  if (primary === "Post-Close Follow Through") return "Hygiene";
+  if (primary === "Ramp / New Hire") return "Activity";
+  if (signal.stale > 0) return "Pipeline Hygiene";
+  if (signal.pctNFT > 0) return "Post-Close Follow Through";
+  return "Attainment / Pace";
+}
+
+function buildActualAttainment() {
+  const repRows = repAttainment
+    .filter((r) => asNum(r.quota) > 0)
+    .map((r) => {
+      const currentPts = asNum(r.currentPts);
+      const quota = asNum(r.quota);
+      const pctToQuota = asNum(r.pctToQuota) || pct(currentPts, quota);
+      return {
+        name: r.name,
+        currentPts,
+        quota,
+        pctToQuota,
+        gap: Math.max(quota - currentPts, 0),
+        reqPtsPerWk: asNum(r.reqPtsPerWk),
+        extraPointsNeeded: asNum(r.extraPointsNeeded),
+      };
+    })
+    .sort((a, b) => a.pctToQuota - b.pctToQuota);
+
+  const teamCurrent = repRows.reduce((sum, r) => sum + r.currentPts, 0);
+  const teamQuota = repRows.reduce((sum, r) => sum + r.quota, 0);
+
+  return {
+    teamCurrent,
+    teamQuota,
+    teamPct: pct(teamCurrent, teamQuota),
+    gap: Math.max(teamQuota - teamCurrent, 0),
+    repRows,
+  };
+}
+
+function buildRepSignals(teamMembers: any[]): RepSignal[] {
+  const memberMap = new Map(teamMembers.map((m: any) => [m.name, m]));
+
+  return repAttainment
+    .filter((r) => asNum(r.quota) > 0)
+    .map((r) => {
+      const pipeline = repPipeline.find((p) => p.name === r.name);
+      const activity = repL12DActivity.find((a) => a.name === r.name);
+      const cwnft = repCWnFT.find((c) => c.name === r.name);
+      const member = memberMap.get(r.name);
+
+      const currentPts = asNum(r.currentPts);
+      const quota = asNum(r.quota);
+      const pctToQuota = asNum(r.pctToQuota) || pct(currentPts, quota);
+      const calls = asNum(activity?.totalCalls);
+      const talkTime = asNum(activity?.talkTime);
+      const openOpps = asNum(pipeline?.totalOpen);
+      const stale = asNum(pipeline?.outOfDate);
+      const createdLW = asNum(pipeline?.createdLW);
+      const totalCW = asNum(cwnft?.totalCW);
+      const cwnftCount = asNum(cwnft?.cwnft);
+      const pctNFT = asNum(cwnft?.pctNFT);
+      const isRamping = member?.status === "ramping";
+
+      const primary = getPrimaryCoachingArea({
+        isRamping,
+        pctNFT,
+        stale,
+        createdLW,
+        calls,
+        pct: pctToQuota,
+        openOpps,
+      });
+      const secondary = getSecondaryCoachingArea(primary, { calls, pct: pctToQuota, stale, pctNFT });
+
+      let score = 0;
+      if (pctToQuota < 60) score += 5;
+      else if (pctToQuota < 80) score += 3;
+      else if (pctToQuota < 90) score += 1;
+
+      if (calls < 250) score += 2;
+      if (stale >= 10) score += 2;
+      if (stale >= 20) score += 2;
+      if (createdLW < 3) score += 1;
+      if (pctNFT >= 15) score += 2;
+      if (isRamping) score += 1;
+      if (openOpps < 5 && pctToQuota < 100) score += 1;
+
+      return {
+        name: r.name,
+        currentPts,
+        quota,
+        pct: pctToQuota,
+        gap: Math.max(quota - currentPts, 0),
+        calls,
+        talkTime,
+        openOpps,
+        stale,
+        createdLW,
+        totalCW,
+        cwnft: cwnftCount,
+        pctNFT,
+        isRamping,
+        primary,
+        secondary,
+        score,
+      };
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
+function buildCoachingThemes(signals: RepSignal[], teamActual: ReturnType<typeof buildActualAttainment>) {
+  const themes: CoachingTheme[] = [];
+
+  const lowAttainment = signals.filter((s) => s.pct < 80).slice(0, 3);
+  const lowActivity = signals.filter((s) => s.calls < 250).slice(0, 3);
+  const pipelineRisk = signals.filter((s) => s.stale >= 10 || s.createdLW < 3).slice(0, 3);
+  const postCloseRisk = signals.filter((s) => s.pctNFT >= 10).slice(0, 3);
+
+  if (teamActual.teamPct < 100) {
+    themes.push({
+      title: "Close the Q1 attainment gap",
+      why: `Team is at ${safePct0(teamActual.teamPct)}% to quota and short ${fmt(teamActual.gap)} points.`,
+      actions: [
+        `Coach ${lowAttainment.map((r) => firstName(r.name)).join(", ") || "the bottom cohort"} first.`,
+        "Tie each rep to a weekly points target and one concrete deal move.",
+        "Use the top 1–2 stalled opportunities to create immediate point movement.",
+      ],
+      focusRep: lowAttainment[0]?.name,
+    });
+  }
+
+  if (pipelineRisk.length > 0 || repPipeline.reduce((s, r) => s + asNum(r.outOfDate), 0) >= 20) {
+    themes.push({
+      title: "Fix pipeline creation and hygiene",
+      why: `${repPipeline.reduce((s, r) => s + asNum(r.outOfDate), 0)} stale opps and weak recent creation are slowing momentum.`,
+      actions: [
+        `Run a hygiene cleanup with ${pipelineRisk.map((r) => firstName(r.name)).join(", ") || "the team"} today.`,
+        "Require a next step, date, and owner on every open opportunity.",
+        "Coach reps to create new opps before old ones go stale.",
+      ],
+      focusRep: pipelineRisk[0]?.name,
+    });
+  }
+
+  if ((asNum(teamCWnFT.pctNFT) || 0) >= 10 || postCloseRisk.length > 0) {
+    themes.push({
+      title: "Tighten post-close follow-through",
+      why: `${asNum(teamCWnFT.cwnft)} deals are closed but not yet live (${safePct0(teamCWnFT.pctNFT)}% CWnFT rate).`,
+      actions: [
+        `Review post-close handoff with ${postCloseRisk.map((r) => firstName(r.name)).join(", ") || "the reps with open CWs"}.`,
+        "Set a same-week live date expectation on every new close.",
+        "Make post-close ownership part of the closing checklist.",
+      ],
+      focusRep: postCloseRisk[0]?.name,
+    });
+  }
+
+  if (lowActivity.length > 0) {
+    themes.push({
+      title: "Raise activity where volume is light",
+      why: "Some reps are below the activity floor and need a stronger habit plan.",
+      actions: [
+        `Coach ${lowActivity.map((r) => firstName(r.name)).join(", ")} on daily call blocks and talk track discipline.`,
+        "Use a daily activity target for the lowest-volume reps.",
+        "Check whether the issue is effort, scheduling, or confidence.",
+      ],
+      focusRep: lowActivity[0]?.name,
+    });
+  }
+
+  if (themes.length === 0) {
+    themes.push({
+      title: "Protect the current pace",
+      why: "The team is not flashing major structural risk, so focus on consistency and maintaining current momentum.",
+      actions: [
+        "Keep the top reps honest on conversion and hygiene.",
+        "Use weekly reviews to prevent pipeline drift.",
+        "Continue reinforcing the behaviors that are already working.",
+      ],
+    });
+  }
+
+  return themes.slice(0, 4);
+}
+
+function generateAlerts(teamMembers: any[]): Alert[] {
+  const alerts: Alert[] = [];
+
+  repL12DActivity.forEach((r) => {
+    const recentCalls = r.calls.slice(-3).reduce((s, c) => s + c, 0);
+    const priorCalls = r.calls.slice(-6, -3).reduce((s, c) => s + c, 0);
+    if (priorCalls > 0 && recentCalls < priorCalls * 0.5) {
+      alerts.push({
+        severity: "critical",
+        emoji: "📉",
+        title: `${firstName(r.name)} activity dropped ${Math.round((1 - recentCalls / priorCalls) * 100)}%`,
+        detail: `Last 3 days: ${recentCalls} calls vs prior 3 days: ${priorCalls} calls`,
+        rep: r.name,
+      });
     }
-    return obj;
+    if (asNum(r.totalCalls) < 250) {
+      alerts.push({
+        severity: "warning",
+        emoji: "📞",
+        title: `${firstName(r.name)} low call volume (${r.totalCalls} L12D)`,
+        detail: "Below 250 calls in the last 12 days.",
+        rep: r.name,
+      });
+    }
   });
 
-  const repCompare = reps.map(r => ({
-    name: r.name.split(' ')[0],
-    calls: r.totalCalls,
-    talkTime: r.totalTalkTime,
-    touchpoints: r.totalTouchpoints,
-    emails: r.totalEmails,
-  }));
-
-  const repColors = ['#276EF1', '#05944F', '#EA8600', '#E11900', '#7627BB', '#00A4B4', '#FF6937'];
-
-  const insights: string[] = [];
-  const lowActivity = reps.filter(r => r.totalCalls < teamAvgCalls * 0.7);
-  if (lowActivity.length > 0) insights.push(`${lowActivity.map(r => r.name.split(' ')[0]).join(', ')} ${lowActivity.length === 1 ? 'is' : 'are'} below 70% of team avg on calls — potential effort gap.`);
-  const highTTLowResult = reps.filter(r => r.totalTalkTime > 15 && r.totalCalls < teamAvgCalls);
-  if (highTTLowResult.length > 0) insights.push(`${highTTLowResult.map(r => r.name.split(' ')[0]).join(', ')} ${highTTLowResult.length === 1 ? 'has' : 'have'} decent talk time but low call count — may need efficiency coaching.`);
-  const recentDrop = reps.filter(r => {
-    const last3 = r.calls.slice(-3).reduce((s, v) => s + v, 0);
-    const first3 = r.calls.slice(0, 3).reduce((s, v) => s + v, 0);
-    return last3 < first3 * 0.5 && first3 > 50;
+  repPipeline.forEach((r) => {
+    if (asNum(r.outOfDate) >= 20) {
+      alerts.push({
+        severity: "critical",
+        emoji: "🗂️",
+        title: `${firstName(r.name)} has ${r.outOfDate} stale opps`,
+        detail: `${r.totalOpen > 0 ? ((asNum(r.outOfDate) / asNum(r.totalOpen)) * 100).toFixed(0) : 0}% of pipeline is out-of-date`,
+        rep: r.name,
+      });
+    } else if (asNum(r.outOfDate) >= 10) {
+      alerts.push({
+        severity: "warning",
+        emoji: "🗂️",
+        title: `${firstName(r.name)} has ${r.outOfDate} stale opps`,
+        detail: "Pipeline cleanup needed this week.",
+        rep: r.name,
+      });
+    }
+    if (asNum(r.createdLW) < 3) {
+      alerts.push({
+        severity: "warning",
+        emoji: "🔻",
+        title: `${firstName(r.name)} only created ${r.createdLW} opps last week`,
+        detail: "Pipeline creation velocity is low.",
+        rep: r.name,
+      });
+    }
   });
-  if (recentDrop.length > 0) insights.push(`${recentDrop.map(r => r.name.split(' ')[0]).join(', ')} show a significant activity drop in the last 3 days vs earlier in the period.`);
 
-  // Radar data for selected rep
-  const selectedRadarRep = radarRep ? repL12DActivity.find(r => r.name === radarRep) : null;
-  const maxCalls = Math.max(...repL12DActivity.map(r => r.totalCalls));
-  const maxTT = Math.max(...repL12DActivity.map(r => r.totalTalkTime));
-  const maxEmails = Math.max(...repL12DActivity.map(r => r.totalEmails));
-  const maxTP = Math.max(...repL12DActivity.map(r => r.totalTouchpoints));
-  const maxBrands = Math.max(...repL12DActivity.map(r => r.brands.reduce((s, v) => s + v, 0)));
+  repAttainment
+    .filter((r) => asNum(r.quota) > 0)
+    .forEach((r) => {
+      const p = asNum(r.pctToQuota) || pct(asNum(r.currentPts), asNum(r.quota));
+      if (p < 60) {
+        alerts.push({
+          severity: "critical",
+          emoji: "🚨",
+          title: `${firstName(r.name)} at ${safePct0(p)}% to quota`,
+          detail: `Needs ${asNum(r.extraPointsNeeded)} more pts.`,
+          rep: r.name,
+        });
+      }
+    });
 
-  const radarData = selectedRadarRep ? [
-    { metric: 'Calls', value: Math.round((selectedRadarRep.totalCalls / maxCalls) * 100), raw: selectedRadarRep.totalCalls },
-    { metric: 'Talk Time', value: Math.round((selectedRadarRep.totalTalkTime / maxTT) * 100), raw: `${selectedRadarRep.totalTalkTime}h` },
-    { metric: 'Emails', value: Math.round((selectedRadarRep.totalEmails / maxEmails) * 100), raw: selectedRadarRep.totalEmails },
-    { metric: 'Touchpoints', value: Math.round((selectedRadarRep.totalTouchpoints / maxTP) * 100), raw: selectedRadarRep.totalTouchpoints },
-    { metric: 'Brands', value: Math.round((selectedRadarRep.brands.reduce((s, v) => s + v, 0) / maxBrands) * 100), raw: selectedRadarRep.brands.reduce((s, v) => s + v, 0) },
-  ] : [];
+  repCWnFT.forEach((r) => {
+    if (asNum(r.pctNFT) >= 15) {
+      alerts.push({
+        severity: "warning",
+        emoji: "🔄",
+        title: `${firstName(r.name)} CWnFT at ${safePct0(r.pctNFT)}%`,
+        detail: `${asNum(r.cwnft)} of ${asNum(r.totalCW)} deals not yet live.`,
+        rep: r.name,
+      });
+    }
+  });
+
+  teamMembers.forEach((m) => {
+    if (m.status === "ramping") {
+      const days = Math.floor((Date.now() - new Date(m.start_date).getTime()) / (1000 * 60 * 60 * 24));
+      if (days > 180) {
+        alerts.push({
+          severity: "warning",
+          emoji: "🐢",
+          title: `${firstName(m.name)} still ramping after ${Math.round(days / 30)} months`,
+          detail: "Review the ramp plan and expectations.",
+          rep: m.name,
+        });
+      }
+      if (days < 60) {
+        alerts.push({
+          severity: "info",
+          emoji: "🌱",
+          title: `${firstName(m.name)} is ${days} days into ramp`,
+          detail: "Focus on activity habits, shadow calls, and product depth.",
+          rep: m.name,
+        });
+      }
+    }
+  });
+
+  const severityOrder = { critical: 0, warning: 1, info: 2 };
+  return alerts.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
+}
+
+const severityStyles = {
+  critical: { bg: "#FFF4F4", border: "#FFD5D5", color: "#B42318", badge: "#E11900" },
+  warning: { bg: "#FFF9ED", border: "#FFE2A8", color: "#B54708", badge: "#EA8600" },
+  info: { bg: "#F2F7FF", border: "#D6E4FF", color: "#175CD3", badge: "#276EF1" },
+};
+
+export default function ManagerHub() {
+  const [css] = useStyletron();
+  const [teamMembers] = useState<any[]>(() => loadTeamMembers());
+  const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem("dismissed-alerts");
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+  const [showAllAlerts, setShowAllAlerts] = useState(false);
+
+  const [aiInput, setAiInput] = useState("");
+  const [aiResponse, setAiResponse] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+
+  const teamActual = useMemo(() => buildActualAttainment(), []);
+  const repSignals = useMemo(() => buildRepSignals(teamMembers), [teamMembers]);
+  const coachingThemes = useMemo(() => buildCoachingThemes(repSignals, teamActual), [repSignals, teamActual]);
+
+  const teamHealth = useMemo(() => {
+    const calls = repL12DActivity.reduce((sum, r) => sum + asNum(r.totalCalls), 0);
+    const talkTime = repL12DActivity.reduce((sum, r) => sum + asNum(r.talkTime), 0);
+    const openOpps = repPipeline.reduce((sum, r) => sum + asNum(r.totalOpen), 0);
+    const staleOpps = repPipeline.reduce((sum, r) => sum + asNum(r.outOfDate), 0);
+    const createdLW = repPipeline.reduce((sum, r) => sum + asNum(r.createdLW), 0);
+    const teamCwnftRate = asNum(teamCWnFT.pctNFT);
+    const teamCwnftCount = asNum(teamCWnFT.cwnft);
+    const teamCW = asNum(teamCWnFT.totalCW);
+    return {
+      calls,
+      talkTime,
+      openOpps,
+      staleOpps,
+      createdLW,
+      teamCwnftRate,
+      teamCwnftCount,
+      teamCW,
+    };
+  }, []);
+
+  const alerts = useMemo(() => generateAlerts(teamMembers), [teamMembers]);
+  const visibleAlerts = alerts.filter((a) => !dismissedAlerts.has(a.title));
+  const alertPreview = showAllAlerts ? visibleAlerts : visibleAlerts.slice(0, 3);
+
+  const topPriorityRep = repSignals[0];
+  const topTheme = coachingThemes[0];
+
+  const summaryCards = useMemo(
+    () => [
+      {
+        label: "Q1 Attainment",
+        value: `${safePct0(teamActual.teamPct)}%`,
+        tone: teamActual.teamPct >= 100 ? "#05944F" : teamActual.teamPct >= 90 ? "#B54708" : "#B42318",
+      },
+      { label: "Gap to Quota", value: fmt(teamActual.gap), tone: teamActual.gap === 0 ? "#05944F" : "#B42318" },
+      { label: "L12D Calls", value: fmt(teamHealth.calls) },
+      {
+        label: "Stale Opps",
+        value: fmt(teamHealth.staleOpps),
+        tone: teamHealth.staleOpps >= 20 ? "#B42318" : teamHealth.staleOpps >= 10 ? "#B54708" : "#333",
+      },
+      {
+        label: "CWnFT Rate",
+        value: `${safePct0(teamHealth.teamCwnftRate)}%`,
+        tone: teamHealth.teamCwnftRate >= 15 ? "#B42318" : teamHealth.teamCwnftRate >= 10 ? "#B54708" : "#05944F",
+      },
+    ],
+    [teamActual, teamHealth]
+  );
+
+  const dismissAlert = (title: string) => {
+    const next = new Set(dismissedAlerts);
+    next.add(title);
+    setDismissedAlerts(next);
+    localStorage.setItem("dismissed-alerts", JSON.stringify([...next]));
+  };
+
+  const askAI = useCallback(
+    async (question?: string) => {
+      const prompt = question || aiInput;
+      if (!prompt.trim()) return;
+
+      setAiLoading(true);
+      setAiResponse("");
+      setAiError("");
+
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        const response = buildManagerAdvisorMarkdown(prompt, {
+          teamMembers,
+          alerts: visibleAlerts.slice(0, 8),
+          teamActual,
+          teamHealth,
+          repSignals,
+          coachingThemes,
+        });
+        setAiResponse(response);
+      } catch (e: any) {
+        setAiError(e?.message || "Request failed");
+      } finally {
+        setAiLoading(false);
+      }
+    },
+    [aiInput, teamMembers, visibleAlerts, teamActual, teamHealth, repSignals, coachingThemes]
+  );
+
+  const runPrompt = (prompt: string) => {
+    setAiInput(prompt);
+    askAI(prompt);
+  };
+
+  const quickPrompts = useMemo(() => {
+    const prompts: { label: string; prompt: string; urgent?: boolean }[] = [];
+
+    prompts.push({
+      label: "🧭 Generate coaching themes",
+      prompt:
+        "Using the current team data, generate 3 coaching themes and the 5 most important action items for this week. Be direct, specific, and manager-ready.",
+      urgent: true,
+    });
+
+    if (topPriorityRep) {
+      prompts.push({
+        label: `🎯 Coach ${firstName(topPriorityRep.name)} first`,
+        prompt: `Coach ${topPriorityRep.name}. Their primary issue is ${topPriorityRep.primary} and their secondary issue is ${topPriorityRep.secondary}. They are at ${safePct0(
+          topPriorityRep.pct
+        )}% to quota, have ${topPriorityRep.calls} calls, ${topPriorityRep.stale} stale opps, and ${safePct0(topPriorityRep.pctNFT)}% CWnFT. Give me 3 coaching actions and a short talk track.`,
+        urgent: true,
+      });
+    }
+
+    prompts.push({
+      label: "📋 Build team action plan",
+      prompt:
+        "Turn the team's current situation into a practical action plan for this week. Break it into today, this week, and coaching follow-up. Focus on attainment, pipeline, and follow-through.",
+    });
+
+    prompts.push({
+      label: "📈 What should I coach today?",
+      prompt:
+        "Based on the current data, tell me what I should coach today, who I should coach first, and what the expected business impact is.",
+    });
+
+    if (teamActual.teamPct < 100) {
+      prompts.push({
+        label: "⚡ Close the quota gap",
+        prompt: `We are at ${safePct0(teamActual.teamPct)}% to quota and short ${fmt(teamActual.gap)} points. Give me a tactical plan to close the gap with the fewest high-confidence actions.`,
+        urgent: true,
+      });
+    }
+
+    if (teamHealth.teamCwnftRate >= 10) {
+      prompts.push({
+        label: `🔄 Fix CWnFT`,
+        prompt: `Our CWnFT rate is ${safePct0(teamHealth.teamCwnftRate)}% with ${teamHealth.teamCwnftCount} deals not yet live. What are the best coaching actions to improve post-close follow-through?`,
+      });
+    }
+
+    return prompts.slice(0, 5);
+  }, [teamActual, teamHealth, topPriorityRep]);
+
+  const actionItems = coachingThemes.flatMap((theme) => theme.actions).slice(0, 5);
 
   return (
     <div>
-      <div className={css({ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '20px' })}>
-        <MetricCard title="Total Calls" value={selectedRep === 'all' ? teamL12DActivity.totalCalls.toLocaleString() : reps[0]?.totalCalls.toLocaleString() || '0'} subtitle="last 12 days" tooltip="Outbound calls across all reps" />
-        <MetricCard title="Total Touchpoints" value={selectedRep === 'all' ? teamL12DActivity.totalTouchpoints.toLocaleString() : reps[0]?.totalTouchpoints.toLocaleString() || '0'} subtitle="calls + emails + SMS + meetings" />
-        <MetricCard title="Avg Calls/Rep" value={Math.round(teamAvgCalls).toLocaleString()} subtitle="team average" />
-        <MetricCard title="Talk Time" value={`${teamL12DActivity.medianTalkTime}h`} subtitle="total median" />
-        <MetricCard title="Total Emails" value={selectedRep === 'all' ? teamL12DActivity.totalEmails.toLocaleString() : reps[0]?.totalEmails.toLocaleString() || '0'} />
-      </div>
+      <SectionHeader title="Manager Hub" subtitle="A compact coaching cockpit for insights, priorities, and action planning." />
 
-      <CollapsibleInsights title="Activity Insights" count={insights.length}>
-        {insights.map((ins, i) => {
-          const isNegative = ins.includes('below') || ins.includes('drop') || ins.includes('gap');
-          return <InsightCard key={i} text={ins} type={isNegative ? 'danger' : 'warning'} />;
+      {/* Today banner */}
+      <div
+        className={css({
+          backgroundColor: "#0B1220",
+          color: "#FFF",
+          borderRadius: "12px",
+          padding: "18px 20px",
+          marginBottom: "16px",
+          border: "1px solid #13213A",
+          display: "flex",
+          justifyContent: "space-between",
+          gap: "16px",
+          alignItems: "center",
+          flexWrap: "wrap",
         })}
-        {insights.length === 0 && <InsightCard text="Activity levels are within normal range across the team." type="success" />}
-      </CollapsibleInsights>
-
-      <div className={css({ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' })}>
-        <div className={css({ backgroundColor: '#FFF', borderRadius: '8px', border: '1px solid #E8E8E8', padding: '16px' })}>
-          <div className={css({ fontSize: '14px', fontFamily: 'UberMove', fontWeight: 700, marginBottom: '12px' })}>Daily Calls Trend</div>
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={dailyTrend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-              <YAxis tick={{ fontSize: 11 }} />
-              <Tooltip />
-              <ReferenceLine y={dailyCallTarget} stroke="#E11900" strokeDasharray="5 5" strokeWidth={1.5} label={{ value: 'Target', position: 'right', fontSize: 9, fill: '#E11900' }} />
-              <Line type="monotone" dataKey="calls" stroke="#276EF1" strokeWidth={2} dot={{ r: 3 }} name="Calls" />
-              <Line type="monotone" dataKey="touchpoints" stroke="#05944F" strokeWidth={1} dot={false} name="Touchpoints" strokeDasharray="4 4" />
-            </LineChart>
-          </ResponsiveContainer>
+      >
+        <div>
+          <div className={css({ fontSize: "11px", opacity: 0.75, marginBottom: "6px", textTransform: "uppercase", letterSpacing: "0.06em" })}>
+            Today’s focus
+          </div>
+          <div className={css({ fontSize: "18px", fontFamily: "UberMove", fontWeight: 700, marginBottom: "6px" })}>
+            {topTheme?.title || "Coach the biggest business risk first"}
+          </div>
+          <div className={css({ fontSize: "13px", lineHeight: "1.5", opacity: 0.9, maxWidth: "760px" })}>
+            {topTheme?.why || "Use this tab to decide who to coach, what to coach, and what actions to assign."}
+          </div>
         </div>
 
-        <div className={css({ backgroundColor: '#FFF', borderRadius: '8px', border: '1px solid #E8E8E8', padding: '16px' })}>
-          <div className={css({ fontSize: '14px', fontFamily: 'UberMove', fontWeight: 700, marginBottom: '12px' })}>Calls by Rep</div>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={repCompare} layout="vertical" margin={{ left: 10 }}>
-              <XAxis type="number" tick={{ fontSize: 11 }} />
-              <YAxis type="category" dataKey="name" width={70} tick={{ fontSize: 11 }} />
-              <Tooltip />
-              <Bar dataKey="calls" radius={[0, 4, 4, 0]} barSize={16}>
-                {repCompare.map((_, i) => <Cell key={i} fill={repColors[i % repColors.length]} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+        <div className={css({ display: "flex", gap: "8px", flexWrap: "wrap" })}>
+          <button
+            onClick={() => runPrompt("Generate 3 coaching themes and 5 specific action items for this week.")}
+            className={css({
+              border: "none",
+              backgroundColor: "#276EF1",
+              color: "#FFF",
+              padding: "10px 14px",
+              borderRadius: "8px",
+              fontFamily: "UberMoveText",
+              fontWeight: 700,
+              cursor: "pointer",
+            })}
+          >
+            Generate coaching themes
+          </button>
+          <button
+            onClick={() =>
+              runPrompt(
+                `Build a manager action plan from the current team data. Include who to coach first, what to say, and the 3 highest leverage actions for this week.`
+              )
+            }
+            className={css({
+              border: "1px solid #334155",
+              backgroundColor: "transparent",
+              color: "#FFF",
+              padding: "10px 14px",
+              borderRadius: "8px",
+              fontFamily: "UberMoveText",
+              fontWeight: 700,
+              cursor: "pointer",
+            })}
+          >
+            Build action plan
+          </button>
         </div>
       </div>
 
-      {/* WoW Comparison by Metric with period toggle */}
-      {(() => {
-        const metrics = [
-          { key: 'calls', label: 'Calls' },
-          { key: 'talkTime', label: 'Talk Time (h)' },
-          { key: 'emails', label: 'Emails' },
-          { key: 'sms', label: 'SMS' },
-          { key: 'meetings', label: 'Meetings' },
-        ];
+      {/* KPIs */}
+      <div
+        className={css({
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+          gap: "10px",
+          marginBottom: "16px",
+        })}
+      >
+        {summaryCards.map((card, i) => (
+          <div
+            key={i}
+            className={css({
+              backgroundColor: "#FFF",
+              border: "1px solid #E8E8E8",
+              borderRadius: "10px",
+              padding: "14px 15px",
+            })}
+          >
+            <div className={css({ fontSize: "11px", fontFamily: "UberMoveText", color: "#888", marginBottom: "6px" })}>{card.label}</div>
+            <div className={css({ fontSize: "23px", fontFamily: "UberMove", fontWeight: 700, color: card.tone || "#111" })}>{card.value}</div>
+          </div>
+        ))}
+      </div>
 
-        const periodLabels: Record<string, string> = { '1': 'WoW', '2': '2Wo2W', '3': '3Wo3W', '4': '4Wo4W', 'mom': 'MoM' };
-        const isMoM = wowPeriod === 'mom';
-        const n = isMoM ? 4 : wowPeriod; // MoM ≈ 4 weeks per side
+      {/* Compact alerts */}
+      <div
+        className={css({
+          backgroundColor: "#FFF",
+          borderRadius: "10px",
+          border: "1px solid #E8E8E8",
+          padding: "14px 16px",
+          marginBottom: "16px",
+        })}
+      >
+        <div className={css({ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "10px" })}>
+          <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "15px" })}>
+            🔔 Smart Alerts
+            <span className={css({ marginLeft: "8px", fontSize: "11px", fontWeight: 600, padding: "3px 8px", borderRadius: "999px", backgroundColor: "#F1F5F9", color: "#334155" })}>
+              {visibleAlerts.length} active
+            </span>
+          </div>
+          <div className={css({ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" })}>
+            <span className={css({ fontSize: "11px", padding: "3px 8px", borderRadius: "999px", backgroundColor: "#FFF4F4", color: "#B42318" })}>
+              {visibleAlerts.filter((a) => a.severity === "critical").length} critical
+            </span>
+            <span className={css({ fontSize: "11px", padding: "3px 8px", borderRadius: "999px", backgroundColor: "#FFF9ED", color: "#B54708" })}>
+              {visibleAlerts.filter((a) => a.severity === "warning").length} warnings
+            </span>
+            <span className={css({ fontSize: "11px", padding: "3px 8px", borderRadius: "999px", backgroundColor: "#F2F7FF", color: "#175CD3" })}>
+              {visibleAlerts.filter((a) => a.severity === "info").length} info
+            </span>
+            {dismissedAlerts.size > 0 && (
+              <button
+                onClick={() => {
+                  setDismissedAlerts(new Set());
+                  localStorage.removeItem("dismissed-alerts");
+                }}
+                className={css({
+                  border: "none",
+                  backgroundColor: "transparent",
+                  fontSize: "11px",
+                  color: "#666",
+                  cursor: "pointer",
+                  fontFamily: "UberMoveText",
+                })}
+              >
+                Reset dismissed
+              </button>
+            )}
+          </div>
+        </div>
 
-        // Use L12W data for weekly comparisons
-        const l12wReps = selectedRep === 'all' ? repL12WActivity : repL12WActivity.filter(r => r.name === selectedRep);
+        {alertPreview.length === 0 ? (
+          <div className={css({ textAlign: "center", padding: "10px", color: "#666", fontSize: "13px", fontFamily: "UberMoveText" })}>
+            ✅ No active alerts. Team looks stable.
+          </div>
+        ) : (
+          <div className={css({ display: "grid", gap: "8px" })}>
+            {alertPreview.map((alert, i) => {
+              const s = severityStyles[alert.severity];
+              return (
+                <div
+                  key={i}
+                  className={css({
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    padding: "9px 12px",
+                    borderRadius: "8px",
+                    backgroundColor: s.bg,
+                    border: `1px solid ${s.border}`,
+                  })}
+                >
+                  <span className={css({ fontSize: "15px" })}>{alert.emoji}</span>
+                  <span
+                    className={css({
+                      fontSize: "10px",
+                      fontWeight: 700,
+                      padding: "2px 6px",
+                      borderRadius: "4px",
+                      backgroundColor: s.badge,
+                      color: "#FFF",
+                      textTransform: "uppercase",
+                    })}
+                  >
+                    {alert.severity}
+                  </span>
+                  <div className={css({ flex: 1, minWidth: 0 })}>
+                    <div className={css({ fontSize: "13px", fontFamily: "UberMoveText", fontWeight: 700, color: s.color, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" })}>
+                      {alert.title}
+                    </div>
+                    <div className={css({ fontSize: "11px", fontFamily: "UberMoveText", color: "#666", marginTop: "1px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" })}>
+                      {alert.detail}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => dismissAlert(alert.title)}
+                    className={css({
+                      border: "none",
+                      backgroundColor: "transparent",
+                      color: "#999",
+                      cursor: "pointer",
+                      fontSize: "18px",
+                      lineHeight: 1,
+                    })}
+                    aria-label="Dismiss alert"
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
-        // For SMS & Meetings, use L12D data split
-        const l12dReps = reps;
+        {visibleAlerts.length > 3 && (
+          <button
+            onClick={() => setShowAllAlerts((v) => !v)}
+            className={css({
+              marginTop: "10px",
+              border: "none",
+              backgroundColor: "transparent",
+              color: "#276EF1",
+              cursor: "pointer",
+              fontSize: "12px",
+              fontFamily: "UberMoveText",
+              fontWeight: 600,
+            })}
+          >
+            {showAllAlerts ? "Show fewer alerts" : `Show all ${visibleAlerts.length} alerts`}
+          </button>
+        )}
+      </div>
 
-        // Recent N weeks = last N entries, Prior N weeks = the N before that
-        const recentStart = 12 - n;
-        const priorStart = 12 - n * 2;
-
-        const periodDesc = isMoM
-          ? `${l12wWeeks[Math.max(0, recentStart)]}–${l12wWeeks[11]} vs ${l12wWeeks[Math.max(0, priorStart)]}–${l12wWeeks[Math.max(0, recentStart - 1)]} (≈month)`
-          : n === 1
-            ? `W/o ${l12wWeeks[11]} vs W/o ${l12wWeeks[10]}`
-            : `${l12wWeeks[Math.max(0, recentStart)]}–${l12wWeeks[11]} vs ${l12wWeeks[Math.max(0, priorStart)]}–${l12wWeeks[Math.max(0, recentStart - 1)]}`;
-
-        const wowRepData = l12wReps.map(r => {
-          const sumSlice = (arr: number[], start: number, end: number) => arr.slice(Math.max(0, start), end).reduce((s, v) => s + v, 0);
-          const l12d = l12dReps.find(d => d.name === r.name);
-          const smsPrior = l12d ? sumSlice(l12d.sms, 0, 6) : 0;
-          const smsRecent = l12d ? sumSlice(l12d.sms, 6, 12) : 0;
-          const meetingsPrior = l12d ? sumSlice(l12d.meetings, 0, 6) : 0;
-          const meetingsRecent = l12d ? sumSlice(l12d.meetings, 6, 12) : 0;
-
-          return {
-            name: r.name.split(' ')[0],
-            callsPrior: sumSlice(r.calls, priorStart, recentStart),
-            callsRecent: sumSlice(r.calls, recentStart, 12),
-            talkTimePrior: +sumSlice(r.talkTime, priorStart, recentStart).toFixed(1),
-            talkTimeRecent: +sumSlice(r.talkTime, recentStart, 12).toFixed(1),
-            emailsPrior: sumSlice(r.emails, priorStart, recentStart),
-            emailsRecent: sumSlice(r.emails, recentStart, 12),
-            smsPrior, smsRecent,
-            meetingsPrior, meetingsRecent,
-          };
-        });
-
-        return (
-          <div className={css({ backgroundColor: '#FFF', borderRadius: '8px', border: '1px solid #E8E8E8', padding: '16px', marginBottom: '24px' })}>
-            <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' })}>
-              <div className={css({ fontSize: '14px', fontFamily: 'UberMove', fontWeight: 700 })}>📊 Period Comparison by Rep</div>
-              <div className={css({ display: 'flex', gap: '4px' })}>
-                {([1, 2, 3, 4, 'mom'] as const).map(p => (
-                  <Button key={p} size={SIZE.mini} kind={wowPeriod === p ? KIND.primary : KIND.tertiary} onClick={() => setWowPeriod(p)}
-                    overrides={{ BaseButton: { style: { backgroundColor: wowPeriod === p ? '#000' : '#F0F0F0', color: wowPeriod === p ? '#FFF' : '#333', fontSize: '11px', paddingLeft: '10px', paddingRight: '10px' } } }}>
-                    {periodLabels[String(p)]}
-                  </Button>
-                ))}
+      {/* Main two-column area */}
+      <div
+        className={css({
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1.15fr) minmax(320px, 0.85fr)",
+          gap: "16px",
+          alignItems: "start",
+          marginBottom: "16px",
+        })}
+      >
+        {/* Attainment + coaching queue */}
+        <div
+          className={css({
+            display: "grid",
+            gap: "16px",
+          })}
+        >
+          <div
+            className={css({
+              backgroundColor: "#FFF",
+              borderRadius: "10px",
+              border: "1px solid #E8E8E8",
+              padding: "16px",
+            })}
+          >
+            <div className={css({ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "8px" })}>
+              <div>
+                <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "16px" })}>📈 Q1 Attainment & Pace</div>
+                <div className={css({ fontSize: "12px", color: "#777", fontFamily: "UberMoveText", marginTop: "2px" })}>
+                  Tracking actual attainment from the Q1 tab.
+                </div>
+              </div>
+              <div
+                className={css({
+                  padding: "7px 10px",
+                  borderRadius: "8px",
+                  backgroundColor: teamActual.teamPct >= 100 ? "#E6F4EA" : teamActual.teamPct >= 90 ? "#FFF9ED" : "#FFF4F4",
+                  color: teamActual.teamPct >= 100 ? "#05944F" : teamActual.teamPct >= 90 ? "#B54708" : "#B42318",
+                  fontSize: "12px",
+                  fontFamily: "UberMoveText",
+                  fontWeight: 700,
+                })}
+              >
+                {safePct0(teamActual.teamPct)}% to quota
               </div>
             </div>
-            <div className={css({ fontSize: '11px', color: '#888', fontFamily: 'UberMoveText', marginBottom: '16px' })}>
-              {periodDesc} — comparing {n === 1 ? '1 week' : `${n} weeks`} vs prior {n === 1 ? '1 week' : `${n} weeks`}
+
+            <div className={css({ display: "grid", gap: "8px" })}>
+              {teamActual.repRows.slice(0, 6).map((r) => (
+                <button
+                  key={r.name}
+                  onClick={() =>
+                    runPrompt(
+                      `Coach ${r.name}. They are at ${safePct0(r.pctToQuota)}% to quota, gap ${fmt(r.gap)} points, and need ${fmt(
+                        r.extraPointsNeeded
+                      )} more points. Build a manager-ready coaching plan with talk track, actions, and what I should inspect next.`
+                    )
+                  }
+                  className={css({
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "11px 12px",
+                    borderRadius: "8px",
+                    border: "1px solid #E8E8E8",
+                    backgroundColor: "#FAFAFA",
+                    cursor: "pointer",
+                    ":hover": { backgroundColor: "#F7F9FC", borderColor: "#D6E4FF" },
+                  })}
+                >
+                  <div className={css({ display: "flex", alignItems: "center", gap: "10px", marginBottom: "5px" })}>
+                    <span className={css({ fontFamily: "UberMoveText", fontWeight: 700, fontSize: "13px", width: "148px" })}>{r.name}</span>
+                    <div className={css({ flex: 1, height: "7px", backgroundColor: "#E8E8E8", borderRadius: "999px", overflow: "hidden" })}>
+                      <div
+                        className={css({
+                          height: "100%",
+                          width: `${Math.min(r.pctToQuota, 100)}%`,
+                          borderRadius: "999px",
+                          backgroundColor: r.pctToQuota >= 100 ? "#05944F" : r.pctToQuota >= 90 ? "#EA8600" : "#E11900",
+                        })}
+                      />
+                    </div>
+                    <span className={css({ width: "52px", textAlign: "right", fontSize: "12px", fontFamily: "UberMoveText", fontWeight: 700, color: r.pctToQuota >= 100 ? "#05944F" : "#E11900" })}>
+                      {safePct0(r.pctToQuota)}%
+                    </span>
+                    <span className={css({ width: "82px", textAlign: "right", fontSize: "11px", fontFamily: "UberMoveText", color: "#666" })}>
+                      {fmt(r.currentPts)}/{fmt(r.quota)}
+                    </span>
+                  </div>
+                  <div className={css({ display: "flex", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" })}>
+                    <div className={css({ fontSize: "11px", color: "#666", fontFamily: "UberMoveText" })}>
+                      Gap: <b>{fmt(r.gap)}</b> pts · Req/wk: <b>{r.reqPtsPerWk ? safePct1(r.reqPtsPerWk) : "—"}</b>
+                    </div>
+                    <div className={css({ display: "flex", gap: "6px", flexWrap: "wrap" })}>
+                      <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#E8F0FE", color: "#175CD3" })}>
+                        {r.currentPts === 0 ? "Ramp" : "Active"}
+                      </span>
+                      <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#F1F5F9", color: "#334155" })}>
+                        {r.calls} calls
+                      </span>
+                      <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#FFF9ED", color: "#B54708" })}>
+                        {r.stale} stale
+                      </span>
+                      <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#FCE7F3", color: "#BE185D" })}>
+                        {safePct0(r.pctNFT)}% CWnFT
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              ))}
             </div>
-            <div className={css({ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '16px' })}>
-              {metrics.map(m => (
-                <div key={m.key} className={css({ border: '1px solid #E8E8E8', borderRadius: '8px', padding: '12px' })}>
-                  <div className={css({ fontSize: '13px', fontFamily: 'UberMove', fontWeight: 700, marginBottom: '8px' })}>{m.label}</div>
-                  <ResponsiveContainer width="100%" height={180}>
-                    <BarChart data={wowRepData} barCategoryGap="20%">
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                      <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} angle={-25} textAnchor="end" height={40} />
-                      <YAxis tick={{ fontSize: 10 }} />
-                      <Tooltip />
-                      <Bar dataKey={`${m.key}Prior`} name={isMoM ? 'Prior Month' : `Prior ${n}W`} fill="#B0C4DE" radius={[3, 3, 0, 0]} barSize={14} />
-                      <Bar dataKey={`${m.key}Recent`} name={isMoM ? 'Recent Month' : `Recent ${n}W`} fill="#276EF1" radius={[3, 3, 0, 0]} barSize={14} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                  <div className={css({ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' })}>
-                    {wowRepData.map(r => {
-                      const prior = r[`${m.key}Prior` as keyof typeof r] as number;
-                      const recent = r[`${m.key}Recent` as keyof typeof r] as number;
-                      const change = prior > 0 ? ((recent - prior) / prior) * 100 : (recent > 0 ? 100 : 0);
-                      const isUp = recent >= prior;
-                      return (
-                        <span key={r.name} className={css({
-                          fontSize: '10px', fontFamily: 'UberMoveText', fontWeight: 600,
-                          padding: '2px 6px', borderRadius: '4px',
-                          color: isUp ? '#05944F' : '#E11900',
-                          backgroundColor: isUp ? '#E6F4EA' : '#FFEBEE',
-                        })}>
-                          {r.name} {isUp ? '↑' : '↓'}{Math.abs(change).toFixed(0)}%
-                        </span>
-                      );
-                    })}
+          </div>
+
+          <div
+            className={css({
+              backgroundColor: "#FFF",
+              borderRadius: "10px",
+              border: "1px solid #E8E8E8",
+              padding: "16px",
+            })}
+          >
+            <div className={css({ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", marginBottom: "8px" })}>
+              <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "16px" })}>🚦 Priority coaching queue</div>
+              <div className={css({ fontSize: "12px", color: "#777", fontFamily: "UberMoveText" })}>Who to coach first and why.</div>
+            </div>
+
+            <div className={css({ display: "grid", gap: "8px" })}>
+              {repSignals.slice(0, 4).map((rep, idx) => (
+                <div
+                  key={rep.name}
+                  className={css({
+                    display: "grid",
+                    gridTemplateColumns: "150px minmax(0, 1fr) 148px",
+                    gap: "10px",
+                    alignItems: "center",
+                    padding: "12px",
+                    borderRadius: "8px",
+                    border: "1px solid #E8E8E8",
+                    backgroundColor: idx === 0 ? "#FFF9ED" : "#FAFAFA",
+                  })}
+                >
+                  <div>
+                    <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "13px", marginBottom: "3px" })}>{rep.name}</div>
+                    <div className={css({ fontSize: "11px", color: "#666", fontFamily: "UberMoveText" })}>
+                      {safePct0(rep.pct)}% to quota · {fmt(rep.gap)} gap
+                    </div>
+                  </div>
+
+                  <div className={css({ display: "grid", gap: "5px" })}>
+                    <div className={css({ display: "flex", gap: "6px", flexWrap: "wrap" })}>
+                      <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#E8F0FE", color: "#175CD3" })}>
+                        {rep.primary}
+                      </span>
+                      <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#F1F5F9", color: "#334155" })}>
+                        {rep.secondary}
+                      </span>
+                    </div>
+                    <div className={css({ fontSize: "12px", color: "#333", fontFamily: "UberMoveText", lineHeight: 1.45 })}>
+                      <b>Next:</b>{" "}
+                      {rep.primary === "Pipeline Creation"
+                        ? "Create new opps and clean stale ones."
+                        : rep.primary === "Post-Close Follow Through"
+                          ? "Set a live date and force ownership."
+                          : rep.primary === "Activity"
+                            ? "Increase call volume and sharpen the talk track."
+                            : rep.primary === "Ramp / New Hire"
+                              ? "Reinforce daily habits and shadowing."
+                              : "Improve deal quality and move next steps."}
+                    </div>
+                  </div>
+
+                  <div className={css({ display: "flex", justifyContent: "flex-end" })}>
+                    <Button
+                      size={SIZE.compact}
+                      kind={KIND.secondary}
+                      onClick={() =>
+                        runPrompt(
+                          `Coach ${rep.name}. Primary issue: ${rep.primary}. Secondary issue: ${rep.secondary}. They are at ${safePct0(
+                            rep.pct
+                          )}% to quota, have ${rep.calls} calls, ${rep.stale} stale opps, and ${safePct0(rep.pctNFT)}% CWnFT. Give me 3 action items and a short talk track.`
+                        )
+                      }
+                    >
+                      Coach with AI
+                    </Button>
                   </div>
                 </div>
               ))}
             </div>
-          </div>
-        );
-      })()}
 
-      <SectionHeader title="L12D Activity Leaderboard" subtitle="Click a rep name for radar breakdown" />
-      <div className={css({ backgroundColor: '#FFF', borderRadius: '8px', border: '1px solid #E8E8E8', overflow: 'auto' })}>
-        <table className={css({ width: '100%', borderCollapse: 'collapse', fontSize: '13px', fontFamily: 'UberMoveText', minWidth: '850px' } as any)}>
-          <thead>
-            <tr className={css({ backgroundColor: '#F8F8F8' } as any)}>
-              {['#', 'Rep', 'Calls', 'Talk Time', 'SMS', 'Meetings', 'Emails', 'Total TP', 'vs Avg'].map(h => (
-                <th key={h} className={css({ padding: '10px 12px', textAlign: h === 'Rep' ? 'left' as const : 'center' as const, fontSize: '11px', fontWeight: 600, color: '#666', borderBottom: '1px solid #E8E8E8' } as any)}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {callLeaderboard.map((rep, i) => {
-              const totalSMS = rep.sms.reduce((s, v) => s + v, 0);
-              const totalMeetings = rep.meetings.reduce((s, v) => s + v, 0);
-              const vsAvg = ((rep.totalTouchpoints / teamAvgTP) * 100 - 100);
-              return (
-                <tr key={i} className={css({ ':hover': { backgroundColor: '#FAFAFA' } } as any)}>
-                  <td className={css({ padding: '10px 12px', fontWeight: 600, borderBottom: '1px solid #F0F0F0', color: '#888', textAlign: 'center' as const } as any)}>{i + 1}</td>
-                  <td
-                    className={css({ padding: '10px 12px', fontWeight: 500, borderBottom: '1px solid #F0F0F0', color: '#276EF1', cursor: 'pointer', ':hover': { textDecoration: 'underline' } } as any)}
-                    onClick={() => setRadarRep(rep.name)}
+            <div className={css({ marginTop: "12px", paddingTop: "12px", borderTop: "1px solid #E8E8E8" })}>
+              <div className={css({ fontFamily: "UberMoveText", fontWeight: 700, fontSize: "12px", color: "#666", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.04em" })}>
+                Team action items
+              </div>
+              <div className={css({ display: "grid", gap: "8px" })}>
+                {actionItems.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className={css({
+                      padding: "9px 11px",
+                      borderRadius: "8px",
+                      backgroundColor: "#F8F9FA",
+                      border: "1px solid #E8E8E8",
+                      fontSize: "12px",
+                      fontFamily: "UberMoveText",
+                      color: "#333",
+                    })}
                   >
-                    {rep.name}
-                  </td>
-                  <td className={css({ padding: '10px 12px', fontWeight: 600, borderBottom: '1px solid #F0F0F0', textAlign: 'center' as const } as any)}>{rep.totalCalls}</td>
-                  <td className={css({ padding: '10px 12px', borderBottom: '1px solid #F0F0F0', textAlign: 'center' as const } as any)}>{rep.totalTalkTime.toFixed(1)}h</td>
-                  <td className={css({ padding: '10px 12px', borderBottom: '1px solid #F0F0F0', textAlign: 'center' as const } as any)}>{totalSMS}</td>
-                  <td className={css({ padding: '10px 12px', borderBottom: '1px solid #F0F0F0', textAlign: 'center' as const } as any)}>{totalMeetings}</td>
-                  <td className={css({ padding: '10px 12px', borderBottom: '1px solid #F0F0F0', textAlign: 'center' as const } as any)}>{rep.totalEmails}</td>
-                  <td className={css({ padding: '10px 12px', fontWeight: 600, borderBottom: '1px solid #F0F0F0', textAlign: 'center' as const } as any)}>{rep.totalTouchpoints}</td>
-                  <td className={css({ padding: '10px 12px', fontWeight: 600, color: pctColor(vsAvg + 100), borderBottom: '1px solid #F0F0F0', textAlign: 'center' as const } as any)}>
-                    {vsAvg >= 0 ? '+' : ''}{vsAvg.toFixed(0)}%
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Radar Chart Modal */}
-      <Modal isOpen={!!radarRep} onClose={() => setRadarRep(null)} overrides={{ Dialog: { style: { width: '520px', borderRadius: '12px' } } }}>
-        <ModalHeader>{radarRep} — L12D Activity Radar</ModalHeader>
-        <ModalBody>
-          {selectedRadarRep && (
-            <div>
-              <ResponsiveContainer width="100%" height={320}>
-                <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="75%">
-                  <PolarGrid stroke="#E8E8E8" />
-                  <PolarAngleAxis dataKey="metric" tick={{ fontSize: 12, fontFamily: 'UberMoveText' }} />
-                  <PolarRadiusAxis angle={90} domain={[0, 100]} tick={false} axisLine={false} />
-                  <Radar name={radarRep!} dataKey="value" stroke="#276EF1" fill="#276EF1" fillOpacity={0.25} strokeWidth={2} />
-                  <Tooltip formatter={(v: number, _: string, props: any) => [`${props.payload.raw} (${v}% of team max)`, props.payload.metric]} />
-                </RadarChart>
-              </ResponsiveContainer>
-              <div className={css({ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '12px' })}>
-                {radarData.map(d => (
-                  <div key={d.metric} className={css({ padding: '8px 12px', backgroundColor: '#F8F9FA', borderRadius: '6px', fontSize: '12px', fontFamily: 'UberMoveText' })}>
-                    <span className={css({ color: '#888' })}>{d.metric}: </span>
-                    <span className={css({ fontWeight: 600 })}>{d.raw}</span>
-                    <span className={css({ color: '#888', marginLeft: '4px' })}>({d.value}%)</span>
+                    {item}
                   </div>
                 ))}
               </div>
             </div>
-          )}
-        </ModalBody>
-      </Modal>
+          </div>
+        </div>
+
+        {/* AI coach panel */}
+        <div className={css({ display: "grid", gap: "16px" })}>
+          <div
+            className={css({
+              backgroundColor: "#FFF",
+              borderRadius: "10px",
+              border: "1px solid #E8E8E8",
+              padding: "16px",
+            })}
+          >
+            <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "16px", marginBottom: "4px" })}>🤖 AI Manager Coach</div>
+            <div className={css({ fontSize: "12px", color: "#777", fontFamily: "UberMoveText", marginBottom: "12px" })}>
+              Generate coaching themes, action plans, and talk tracks.
+            </div>
+
+            <div className={css({ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "12px" })}>
+              {quickPrompts.map((qp, i) => (
+                <button
+                  key={i}
+                  onClick={() => runPrompt(qp.prompt)}
+                  className={css({
+                    padding: "7px 10px",
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                    fontFamily: "UberMoveText",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    border: `1px solid ${qp.urgent ? "#FFD5D5" : "#E8E8E8"}`,
+                    backgroundColor: qp.urgent ? "#FFF4F4" : "#FAFAFA",
+                    color: "#222",
+                  })}
+                >
+                  {qp.label}
+                </button>
+              ))}
+            </div>
+
+            <div className={css({ display: "flex", gap: "8px", marginBottom: "12px" })}>
+              <div className={css({ flex: 1 })}>
+                <Textarea
+                  value={aiInput}
+                  onChange={(e) => setAiInput(e.target.value)}
+                  placeholder="Ask for themes, actions, or talk tracks..."
+                  overrides={{
+                    Input: {
+                      style: {
+                        fontSize: "13px",
+                        minHeight: "72px",
+                        fontFamily: "UberMoveText",
+                      },
+                    },
+                  }}
+                />
+              </div>
+              <Button size={SIZE.compact} kind={KIND.primary} onClick={() => askAI()} disabled={aiLoading || !aiInput.trim()}>
+                {aiLoading ? "..." : "Ask"}
+              </Button>
+            </div>
+
+            {aiError && (
+              <div className={css({ color: "#B42318", fontSize: "12px", fontFamily: "UberMoveText", marginBottom: "8px" })}>{aiError}</div>
+            )}
+
+            {aiResponse ? (
+              <div
+                className={css({
+                  fontSize: "13px",
+                  fontFamily: "UberMoveText",
+                  lineHeight: "1.7",
+                  color: "#333",
+                  backgroundColor: "#F8F9FA",
+                  borderRadius: "10px",
+                  padding: "14px",
+                })}
+              >
+                <ReactMarkdown>{aiResponse}</ReactMarkdown>
+              </div>
+            ) : (
+              <div
+                className={css({
+                  fontSize: "13px",
+                  fontFamily: "UberMoveText",
+                  lineHeight: "1.7",
+                  color: "#666",
+                  backgroundColor: "#F8F9FA",
+                  borderRadius: "10px",
+                  padding: "14px",
+                })}
+              >
+                Ask the coach to turn the team data into themes and a concrete action plan.
+              </div>
+            )}
+          </div>
+
+          <div
+            className={css({
+              backgroundColor: "#FFF",
+              borderRadius: "10px",
+              border: "1px solid #E8E8E8",
+              padding: "16px",
+            })}
+          >
+            <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "15px", marginBottom: "8px" })}>What this hub should answer</div>
+            <div className={css({ display: "grid", gap: "8px" })}>
+              {[
+                "Who needs coaching first?",
+                "Why are they behind?",
+                "What action items should I assign today?",
+                "What is the team theme this week?",
+              ].map((item, idx) => (
+                <div
+                  key={idx}
+                  className={css({
+                    padding: "10px 11px",
+                    borderRadius: "8px",
+                    border: "1px solid #E8E8E8",
+                    backgroundColor: "#FAFAFA",
+                    fontSize: "12px",
+                    fontFamily: "UberMoveText",
+                    color: "#333",
+                  })}
+                >
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
