@@ -204,7 +204,7 @@ function buildCoachingThemes(signals: RepSignal[], teamActual: ReturnType<typeof
       actions: [
         `Coach ${lowAttainment.map((r) => firstName(r.name)).join(", ") || "the bottom cohort"} first.`,
         "Tie each rep to a weekly points target and one concrete deal move.",
-        "Use the top 1-2 stalled opportunities to create immediate point movement.",
+        "Use the top 1–2 stalled opportunities to create immediate point movement.",
       ],
       focusRep: lowAttainment[0]?.name,
     });
@@ -322,11 +322,12 @@ function generateAlerts(teamMembers: any[]): Alert[] {
   repAttainment
     .filter((r) => asNum(r.quota) > 0)
     .forEach((r) => {
-      if ((asNum(r.pctToQuota) || pct(asNum(r.currentPts), asNum(r.quota))) < 60) {
+      const p = asNum(r.pctToQuota) || pct(asNum(r.currentPts), asNum(r.quota));
+      if (p < 60) {
         alerts.push({
           severity: "critical",
           emoji: "🚨",
-          title: `${firstName(r.name)} at ${safePct0(asNum(r.pctToQuota) || pct(asNum(r.currentPts), asNum(r.quota)))}% to quota`,
+          title: `${firstName(r.name)} at ${safePct0(p)}% to quota`,
           detail: `Needs ${asNum(r.extraPointsNeeded)} more pts.`,
           rep: r.name,
         });
@@ -374,9 +375,9 @@ function generateAlerts(teamMembers: any[]): Alert[] {
 }
 
 const severityStyles = {
-  critical: { bg: "#FFEBEE", border: "#FFCDD2", color: "#B71C1C", badge: "#E11900" },
-  warning: { bg: "#FFF8E1", border: "#FFE082", color: "#E65100", badge: "#EA8600" },
-  info: { bg: "#E8F0FE", border: "#BBDEFB", color: "#1565C0", badge: "#276EF1" },
+  critical: { bg: "#FFF4F4", border: "#FFD5D5", color: "#B42318", badge: "#E11900" },
+  warning: { bg: "#FFF9ED", border: "#FFE2A8", color: "#B54708", badge: "#EA8600" },
+  info: { bg: "#F2F7FF", border: "#D6E4FF", color: "#175CD3", badge: "#276EF1" },
 };
 
 export default function ManagerHub() {
@@ -424,33 +425,33 @@ export default function ManagerHub() {
 
   const alerts = useMemo(() => generateAlerts(teamMembers), [teamMembers]);
   const visibleAlerts = alerts.filter((a) => !dismissedAlerts.has(a.title));
-  const alertPreview = showAllAlerts ? visibleAlerts : visibleAlerts.slice(0, 4);
+  const alertPreview = showAllAlerts ? visibleAlerts : visibleAlerts.slice(0, 3);
+
+  const topPriorityRep = repSignals[0];
+  const topTheme = coachingThemes[0];
 
   const summaryCards = useMemo(
     () => [
       {
         label: "Q1 Attainment",
         value: `${safePct0(teamActual.teamPct)}%`,
-        tone: teamActual.teamPct >= 100 ? "#05944F" : teamActual.teamPct >= 90 ? "#EA8600" : "#E11900",
+        tone: teamActual.teamPct >= 100 ? "#05944F" : teamActual.teamPct >= 90 ? "#B54708" : "#B42318",
       },
-      { label: "Gap to Quota", value: fmt(teamActual.gap), tone: teamActual.gap === 0 ? "#05944F" : "#E11900" },
+      { label: "Gap to Quota", value: fmt(teamActual.gap), tone: teamActual.gap === 0 ? "#05944F" : "#B42318" },
       { label: "L12D Calls", value: fmt(teamHealth.calls) },
       {
         label: "Stale Opps",
         value: fmt(teamHealth.staleOpps),
-        tone: teamHealth.staleOpps >= 20 ? "#E11900" : teamHealth.staleOpps >= 10 ? "#EA8600" : "#333",
+        tone: teamHealth.staleOpps >= 20 ? "#B42318" : teamHealth.staleOpps >= 10 ? "#B54708" : "#333",
       },
       {
         label: "CWnFT Rate",
         value: `${safePct0(teamHealth.teamCwnftRate)}%`,
-        tone: teamHealth.teamCwnftRate >= 15 ? "#E11900" : teamHealth.teamCwnftRate >= 10 ? "#EA8600" : "#05944F",
+        tone: teamHealth.teamCwnftRate >= 15 ? "#B42318" : teamHealth.teamCwnftRate >= 10 ? "#B54708" : "#05944F",
       },
     ],
     [teamActual, teamHealth]
   );
-
-  const topPriorityRep = repSignals[0];
-  const topTheme = coachingThemes[0];
 
   const dismissAlert = (title: string) => {
     const next = new Set(dismissedAlerts);
@@ -487,6 +488,11 @@ export default function ManagerHub() {
     },
     [aiInput, teamMembers, visibleAlerts, teamActual, teamHealth, repSignals, coachingThemes]
   );
+
+  const runPrompt = (prompt: string) => {
+    setAiInput(prompt);
+    askAI(prompt);
+  };
 
   const quickPrompts = useMemo(() => {
     const prompts: { label: string; prompt: string; urgent?: boolean }[] = [];
@@ -538,24 +544,20 @@ export default function ManagerHub() {
     return prompts.slice(0, 5);
   }, [teamActual, teamHealth, topPriorityRep]);
 
-  const runPrompt = (prompt: string) => {
-    setAiInput(prompt);
-    askAI(prompt);
-  };
-
-  const actionItems = coachingThemes.flatMap((theme) => theme.actions).slice(0, 6);
+  const actionItems = coachingThemes.flatMap((theme) => theme.actions).slice(0, 5);
 
   return (
     <div>
-      <SectionHeader title="Manager Hub" subtitle="A coaching cockpit for insights, priorities, and action planning." />
+      <SectionHeader title="Manager Hub" subtitle="A compact coaching cockpit for insights, priorities, and action planning." />
 
+      {/* Today banner */}
       <div
         className={css({
           backgroundColor: "#0B1220",
           color: "#FFF",
           borderRadius: "12px",
           padding: "18px 20px",
-          marginBottom: "18px",
+          marginBottom: "16px",
           border: "1px solid #13213A",
           display: "flex",
           justifyContent: "space-between",
@@ -565,13 +567,13 @@ export default function ManagerHub() {
         })}
       >
         <div>
-          <div className={css({ fontSize: "12px", opacity: 0.75, marginBottom: "6px", textTransform: "uppercase", letterSpacing: "0.06em" })}>
-            Today's coaching direction
+          <div className={css({ fontSize: "11px", opacity: 0.75, marginBottom: "6px", textTransform: "uppercase", letterSpacing: "0.06em" })}>
+            Today’s focus
           </div>
           <div className={css({ fontSize: "18px", fontFamily: "UberMove", fontWeight: 700, marginBottom: "6px" })}>
             {topTheme?.title || "Coach the biggest business risk first"}
           </div>
-          <div className={css({ fontSize: "13px", lineHeight: "1.5", opacity: 0.9 })}>
+          <div className={css({ fontSize: "13px", lineHeight: "1.5", opacity: 0.9, maxWidth: "760px" })}>
             {topTheme?.why || "Use this tab to decide who to coach, what to coach, and what actions to assign."}
           </div>
         </div>
@@ -614,12 +616,13 @@ export default function ManagerHub() {
         </div>
       </div>
 
+      {/* KPIs */}
       <div
         className={css({
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: "12px",
-          marginBottom: "18px",
+          gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+          gap: "10px",
+          marginBottom: "16px",
         })}
       >
         {summaryCards.map((card, i) => (
@@ -629,39 +632,40 @@ export default function ManagerHub() {
               backgroundColor: "#FFF",
               border: "1px solid #E8E8E8",
               borderRadius: "10px",
-              padding: "16px",
+              padding: "14px 15px",
             })}
           >
             <div className={css({ fontSize: "11px", fontFamily: "UberMoveText", color: "#888", marginBottom: "6px" })}>{card.label}</div>
-            <div className={css({ fontSize: "24px", fontFamily: "UberMove", fontWeight: 700, color: card.tone || "#111" })}>{card.value}</div>
+            <div className={css({ fontSize: "23px", fontFamily: "UberMove", fontWeight: 700, color: card.tone || "#111" })}>{card.value}</div>
           </div>
         ))}
       </div>
 
+      {/* Compact alerts */}
       <div
         className={css({
           backgroundColor: "#FFF",
           borderRadius: "10px",
           border: "1px solid #E8E8E8",
-          padding: "16px",
-          marginBottom: "18px",
+          padding: "14px 16px",
+          marginBottom: "16px",
         })}
       >
-        <div className={css({ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "12px" })}>
-          <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "16px" })}>
+        <div className={css({ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "10px" })}>
+          <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "15px" })}>
             🔔 Smart Alerts
             <span className={css({ marginLeft: "8px", fontSize: "11px", fontWeight: 600, padding: "3px 8px", borderRadius: "999px", backgroundColor: "#F1F5F9", color: "#334155" })}>
               {visibleAlerts.length} active
             </span>
           </div>
-          <div className={css({ display: "flex", gap: "8px", flexWrap: "wrap" })}>
-            <span className={css({ fontSize: "11px", padding: "3px 8px", borderRadius: "999px", backgroundColor: "#FFEBEE", color: "#B71C1C" })}>
+          <div className={css({ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" })}>
+            <span className={css({ fontSize: "11px", padding: "3px 8px", borderRadius: "999px", backgroundColor: "#FFF4F4", color: "#B42318" })}>
               {visibleAlerts.filter((a) => a.severity === "critical").length} critical
             </span>
-            <span className={css({ fontSize: "11px", padding: "3px 8px", borderRadius: "999px", backgroundColor: "#FFF8E1", color: "#E65100" })}>
+            <span className={css({ fontSize: "11px", padding: "3px 8px", borderRadius: "999px", backgroundColor: "#FFF9ED", color: "#B54708" })}>
               {visibleAlerts.filter((a) => a.severity === "warning").length} warnings
             </span>
-            <span className={css({ fontSize: "11px", padding: "3px 8px", borderRadius: "999px", backgroundColor: "#E8F0FE", color: "#1565C0" })}>
+            <span className={css({ fontSize: "11px", padding: "3px 8px", borderRadius: "999px", backgroundColor: "#F2F7FF", color: "#175CD3" })}>
               {visibleAlerts.filter((a) => a.severity === "info").length} info
             </span>
             {dismissedAlerts.size > 0 && (
@@ -686,7 +690,7 @@ export default function ManagerHub() {
         </div>
 
         {alertPreview.length === 0 ? (
-          <div className={css({ textAlign: "center", padding: "12px", color: "#666", fontSize: "13px", fontFamily: "UberMoveText" })}>
+          <div className={css({ textAlign: "center", padding: "10px", color: "#666", fontSize: "13px", fontFamily: "UberMoveText" })}>
             ✅ No active alerts. Team looks stable.
           </div>
         ) : (
@@ -700,13 +704,13 @@ export default function ManagerHub() {
                     display: "flex",
                     alignItems: "center",
                     gap: "10px",
-                    padding: "10px 12px",
+                    padding: "9px 12px",
                     borderRadius: "8px",
                     backgroundColor: s.bg,
                     border: `1px solid ${s.border}`,
                   })}
                 >
-                  <span className={css({ fontSize: "16px" })}>{alert.emoji}</span>
+                  <span className={css({ fontSize: "15px" })}>{alert.emoji}</span>
                   <span
                     className={css({
                       fontSize: "10px",
@@ -720,9 +724,13 @@ export default function ManagerHub() {
                   >
                     {alert.severity}
                   </span>
-                  <div className={css({ flex: 1 })}>
-                    <div className={css({ fontSize: "13px", fontFamily: "UberMoveText", fontWeight: 700, color: s.color })}>{alert.title}</div>
-                    <div className={css({ fontSize: "11px", fontFamily: "UberMoveText", color: "#666", marginTop: "2px" })}>{alert.detail}</div>
+                  <div className={css({ flex: 1, minWidth: 0 })}>
+                    <div className={css({ fontSize: "13px", fontFamily: "UberMoveText", fontWeight: 700, color: s.color, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" })}>
+                      {alert.title}
+                    </div>
+                    <div className={css({ fontSize: "11px", fontFamily: "UberMoveText", color: "#666", marginTop: "1px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" })}>
+                      {alert.detail}
+                    </div>
                   </div>
                   <button
                     onClick={() => dismissAlert(alert.title)}
@@ -744,7 +752,7 @@ export default function ManagerHub() {
           </div>
         )}
 
-        {visibleAlerts.length > 4 && (
+        {visibleAlerts.length > 3 && (
           <button
             onClick={() => setShowAllAlerts((v) => !v)}
             className={css({
@@ -763,213 +771,234 @@ export default function ManagerHub() {
         )}
       </div>
 
+      {/* Main two-column area */}
       <div
         className={css({
           display: "grid",
           gridTemplateColumns: "minmax(0, 1.15fr) minmax(320px, 0.85fr)",
-          gap: "20px",
+          gap: "16px",
           alignItems: "start",
-          marginBottom: "20px",
+          marginBottom: "16px",
         })}
       >
+        {/* Attainment + coaching queue */}
         <div
           className={css({
-            backgroundColor: "#FFF",
-            borderRadius: "10px",
-            border: "1px solid #E8E8E8",
-            padding: "20px",
+            display: "grid",
+            gap: "16px",
           })}
         >
-          <div className={css({ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "10px" })}>
-            <div>
-              <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "16px" })}>📈 Q1 Attainment & Pace</div>
-              <div className={css({ fontSize: "12px", color: "#777", fontFamily: "UberMoveText", marginTop: "3px" })}>
-                Tracking actual attainment from the Q1 tab, not a modeled scenario.
-              </div>
-            </div>
-            <div
-              className={css({
-                padding: "8px 10px",
-                borderRadius: "8px",
-                backgroundColor: teamActual.teamPct >= 100 ? "#E6F4EA" : teamActual.teamPct >= 90 ? "#FFF8E1" : "#FFEBEE",
-                color: teamActual.teamPct >= 100 ? "#05944F" : teamActual.teamPct >= 90 ? "#E65100" : "#B71C1C",
-                fontSize: "12px",
-                fontFamily: "UberMoveText",
-                fontWeight: 700,
-              })}
-            >
-              {safePct0(teamActual.teamPct)}% to quota
-            </div>
-          </div>
-
-          <div className={css({ display: "grid", gap: "10px" })}>
-            {teamActual.repRows.map((r) => (
-              <button
-                key={r.name}
-                onClick={() =>
-                  runPrompt(
-                    `Coach ${r.name}. They are at ${safePct0(r.pctToQuota)}% to quota, gap ${fmt(r.gap)} points, and need ${fmt(
-                      r.extraPointsNeeded
-                    )} more points. Build a manager-ready coaching plan with talk track, actions, and what I should inspect next.`
-                  )
-                }
-                className={css({
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "12px 14px",
-                  borderRadius: "8px",
-                  border: "1px solid #E8E8E8",
-                  backgroundColor: "#FAFAFA",
-                  cursor: "pointer",
-                  transition: "all 0.15s ease",
-                  ":hover": { backgroundColor: "#F0F4FF", borderColor: "#BBDEFB" },
-                })}
-              >
-                <div className={css({ display: "flex", alignItems: "center", gap: "12px", marginBottom: "6px" })}>
-                  <span className={css({ fontFamily: "UberMoveText", fontWeight: 700, fontSize: "13px", width: "150px" })}>{r.name}</span>
-                  <div className={css({ flex: 1, height: "8px", backgroundColor: "#E8E8E8", borderRadius: "999px", overflow: "hidden" })}>
-                    <div
-                      className={css({
-                        height: "100%",
-                        width: `${Math.min(r.pctToQuota, 100)}%`,
-                        borderRadius: "999px",
-                        backgroundColor: r.pctToQuota >= 100 ? "#05944F" : r.pctToQuota >= 90 ? "#EA8600" : "#E11900",
-                      })}
-                    />
-                  </div>
-                  <span
-                    className={css({
-                      width: "54px",
-                      textAlign: "right",
-                      fontSize: "12px",
-                      fontFamily: "UberMoveText",
-                      fontWeight: 700,
-                      color: r.pctToQuota >= 100 ? "#05944F" : "#E11900",
-                    })}
-                  >
-                    {safePct0(r.pctToQuota)}%
-                  </span>
-                  <span className={css({ width: "84px", textAlign: "right", fontSize: "11px", fontFamily: "UberMoveText", color: "#666" })}>
-                    {fmt(r.currentPts)}/{fmt(r.quota)}
-                  </span>
-                </div>
-                <div className={css({ display: "flex", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" })}>
-                  <div className={css({ fontSize: "11px", color: "#666", fontFamily: "UberMoveText" })}>
-                    Gap: <b>{fmt(r.gap)}</b> pts · Req/wk: <b>{r.reqPtsPerWk ? safePct1(r.reqPtsPerWk) : "—"}</b>
-                  </div>
-                  <div className={css({ display: "flex", gap: "8px", flexWrap: "wrap" })}>
-                    <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#E8F0FE", color: "#1565C0" })}>
-                      {r.primary}
-                    </span>
-                    <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#F1F5F9", color: "#334155" })}>
-                      {r.calls} calls
-                    </span>
-                    <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#FFF8E1", color: "#E65100" })}>
-                      {r.stale} stale
-                    </span>
-                    <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#FCE7F3", color: "#BE185D" })}>
-                      {safePct0(r.pctNFT)}% CWnFT
-                    </span>
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className={css({ display: "grid", gap: "20px" })}>
           <div
             className={css({
               backgroundColor: "#FFF",
               borderRadius: "10px",
               border: "1px solid #E8E8E8",
-              padding: "20px",
+              padding: "16px",
             })}
           >
-            <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "16px", marginBottom: "4px" })}>🧠 Coaching themes</div>
-            <div className={css({ fontSize: "12px", color: "#777", fontFamily: "UberMoveText", marginBottom: "14px" })}>
-              These are the manager-level themes the tab should drive.
+            <div className={css({ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "8px" })}>
+              <div>
+                <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "16px" })}>📈 Q1 Attainment & Pace</div>
+                <div className={css({ fontSize: "12px", color: "#777", fontFamily: "UberMoveText", marginTop: "2px" })}>
+                  Tracking actual attainment from the Q1 tab.
+                </div>
+              </div>
+              <div
+                className={css({
+                  padding: "7px 10px",
+                  borderRadius: "8px",
+                  backgroundColor: teamActual.teamPct >= 100 ? "#E6F4EA" : teamActual.teamPct >= 90 ? "#FFF9ED" : "#FFF4F4",
+                  color: teamActual.teamPct >= 100 ? "#05944F" : teamActual.teamPct >= 90 ? "#B54708" : "#B42318",
+                  fontSize: "12px",
+                  fontFamily: "UberMoveText",
+                  fontWeight: 700,
+                })}
+              >
+                {safePct0(teamActual.teamPct)}% to quota
+              </div>
             </div>
 
-            <div className={css({ display: "grid", gap: "12px" })}>
-              {coachingThemes.map((theme, i) => (
-                <div
-                  key={i}
+            <div className={css({ display: "grid", gap: "8px" })}>
+              {teamActual.repRows.slice(0, 6).map((r) => (
+                <button
+                  key={r.name}
+                  onClick={() =>
+                    runPrompt(
+                      `Coach ${r.name}. They are at ${safePct0(r.pctToQuota)}% to quota, gap ${fmt(r.gap)} points, and need ${fmt(
+                        r.extraPointsNeeded
+                      )} more points. Build a manager-ready coaching plan with talk track, actions, and what I should inspect next.`
+                    )
+                  }
                   className={css({
-                    padding: "14px",
-                    borderRadius: "10px",
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "11px 12px",
+                    borderRadius: "8px",
                     border: "1px solid #E8E8E8",
-                    backgroundColor: i === 0 ? "#F8F9FA" : "#FFF",
+                    backgroundColor: "#FAFAFA",
+                    cursor: "pointer",
+                    ":hover": { backgroundColor: "#F7F9FC", borderColor: "#D6E4FF" },
                   })}
                 >
-                  <div className={css({ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center", marginBottom: "6px" })}>
-                    <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "14px" })}>{theme.title}</div>
-                    {theme.focusRep && (
-                      <span className={css({ fontSize: "10px", padding: "3px 8px", borderRadius: "999px", backgroundColor: "#E8F0FE", color: "#1565C0" })}>
-                        Focus: {firstName(theme.focusRep)}
-                      </span>
-                    )}
+                  <div className={css({ display: "flex", alignItems: "center", gap: "10px", marginBottom: "5px" })}>
+                    <span className={css({ fontFamily: "UberMoveText", fontWeight: 700, fontSize: "13px", width: "148px" })}>{r.name}</span>
+                    <div className={css({ flex: 1, height: "7px", backgroundColor: "#E8E8E8", borderRadius: "999px", overflow: "hidden" })}>
+                      <div
+                        className={css({
+                          height: "100%",
+                          width: `${Math.min(r.pctToQuota, 100)}%`,
+                          borderRadius: "999px",
+                          backgroundColor: r.pctToQuota >= 100 ? "#05944F" : r.pctToQuota >= 90 ? "#EA8600" : "#E11900",
+                        })}
+                      />
+                    </div>
+                    <span className={css({ width: "52px", textAlign: "right", fontSize: "12px", fontFamily: "UberMoveText", fontWeight: 700, color: r.pctToQuota >= 100 ? "#05944F" : "#E11900" })}>
+                      {safePct0(r.pctToQuota)}%
+                    </span>
+                    <span className={css({ width: "82px", textAlign: "right", fontSize: "11px", fontFamily: "UberMoveText", color: "#666" })}>
+                      {fmt(r.currentPts)}/{fmt(r.quota)}
+                    </span>
                   </div>
-                  <div className={css({ fontSize: "12px", color: "#666", fontFamily: "UberMoveText", lineHeight: 1.5, marginBottom: "10px" })}>{theme.why}</div>
-                  <ul className={css({ margin: 0, paddingLeft: "18px", display: "grid", gap: "6px" })}>
-                    {theme.actions.map((action, j) => (
-                      <li key={j} className={css({ fontSize: "12px", color: "#333", fontFamily: "UberMoveText", lineHeight: 1.5 })}>
-                        {action}
-                      </li>
-                    ))}
-                  </ul>
+                  <div className={css({ display: "flex", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" })}>
+                    <div className={css({ fontSize: "11px", color: "#666", fontFamily: "UberMoveText" })}>
+                      Gap: <b>{fmt(r.gap)}</b> pts · Req/wk: <b>{r.reqPtsPerWk ? safePct1(r.reqPtsPerWk) : "—"}</b>
+                    </div>
+                    <div className={css({ display: "flex", gap: "6px", flexWrap: "wrap" })}>
+                      <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#E8F0FE", color: "#175CD3" })}>
+                        {r.currentPts === 0 ? "Ramp" : "Active"}
+                      </span>
+                      <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#F1F5F9", color: "#334155" })}>
+                        {r.calls} calls
+                      </span>
+                      <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#FFF9ED", color: "#B54708" })}>
+                        {r.stale} stale
+                      </span>
+                      <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#FCE7F3", color: "#BE185D" })}>
+                        {safePct0(r.pctNFT)}% CWnFT
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div
+            className={css({
+              backgroundColor: "#FFF",
+              borderRadius: "10px",
+              border: "1px solid #E8E8E8",
+              padding: "16px",
+            })}
+          >
+            <div className={css({ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", marginBottom: "8px" })}>
+              <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "16px" })}>🚦 Priority coaching queue</div>
+              <div className={css({ fontSize: "12px", color: "#777", fontFamily: "UberMoveText" })}>Who to coach first and why.</div>
+            </div>
+
+            <div className={css({ display: "grid", gap: "8px" })}>
+              {repSignals.slice(0, 4).map((rep, idx) => (
+                <div
+                  key={rep.name}
+                  className={css({
+                    display: "grid",
+                    gridTemplateColumns: "150px minmax(0, 1fr) 148px",
+                    gap: "10px",
+                    alignItems: "center",
+                    padding: "12px",
+                    borderRadius: "8px",
+                    border: "1px solid #E8E8E8",
+                    backgroundColor: idx === 0 ? "#FFF9ED" : "#FAFAFA",
+                  })}
+                >
+                  <div>
+                    <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "13px", marginBottom: "3px" })}>{rep.name}</div>
+                    <div className={css({ fontSize: "11px", color: "#666", fontFamily: "UberMoveText" })}>
+                      {safePct0(rep.pct)}% to quota · {fmt(rep.gap)} gap
+                    </div>
+                  </div>
+
+                  <div className={css({ display: "grid", gap: "5px" })}>
+                    <div className={css({ display: "flex", gap: "6px", flexWrap: "wrap" })}>
+                      <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#E8F0FE", color: "#175CD3" })}>
+                        {rep.primary}
+                      </span>
+                      <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#F1F5F9", color: "#334155" })}>
+                        {rep.secondary}
+                      </span>
+                    </div>
+                    <div className={css({ fontSize: "12px", color: "#333", fontFamily: "UberMoveText", lineHeight: 1.45 })}>
+                      <b>Next:</b>{" "}
+                      {rep.primary === "Pipeline Creation"
+                        ? "Create new opps and clean stale ones."
+                        : rep.primary === "Post-Close Follow Through"
+                          ? "Set a live date and force ownership."
+                          : rep.primary === "Activity"
+                            ? "Increase call volume and sharpen the talk track."
+                            : rep.primary === "Ramp / New Hire"
+                              ? "Reinforce daily habits and shadowing."
+                              : "Improve deal quality and move next steps."}
+                    </div>
+                  </div>
+
+                  <div className={css({ display: "flex", justifyContent: "flex-end" })}>
+                    <Button
+                      size={SIZE.compact}
+                      kind={KIND.secondary}
+                      onClick={() =>
+                        runPrompt(
+                          `Coach ${rep.name}. Primary issue: ${rep.primary}. Secondary issue: ${rep.secondary}. They are at ${safePct0(
+                            rep.pct
+                          )}% to quota, have ${rep.calls} calls, ${rep.stale} stale opps, and ${safePct0(rep.pctNFT)}% CWnFT. Give me 3 action items and a short talk track.`
+                        )
+                      }
+                    >
+                      Coach with AI
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
 
-            {actionItems.length > 0 && (
-              <div className={css({ marginTop: "14px", paddingTop: "14px", borderTop: "1px solid #E8E8E8" })}>
-                <div
-                  className={css({
-                    fontFamily: "UberMoveText",
-                    fontWeight: 700,
-                    fontSize: "12px",
-                    color: "#666",
-                    marginBottom: "8px",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.04em",
-                  })}
-                >
-                  Team action items
-                </div>
-                <div className={css({ display: "grid", gap: "8px" })}>
-                  {actionItems.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className={css({
-                        padding: "10px 12px",
-                        borderRadius: "8px",
-                        backgroundColor: "#F8F9FA",
-                        border: "1px solid #E8E8E8",
-                        fontSize: "12px",
-                        fontFamily: "UberMoveText",
-                        color: "#333",
-                      })}
-                    >
-                      {item}
-                    </div>
-                  ))}
-                </div>
+            <div className={css({ marginTop: "12px", paddingTop: "12px", borderTop: "1px solid #E8E8E8" })}>
+              <div className={css({ fontFamily: "UberMoveText", fontWeight: 700, fontSize: "12px", color: "#666", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.04em" })}>
+                Team action items
               </div>
-            )}
+              <div className={css({ display: "grid", gap: "8px" })}>
+                {actionItems.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className={css({
+                      padding: "9px 11px",
+                      borderRadius: "8px",
+                      backgroundColor: "#F8F9FA",
+                      border: "1px solid #E8E8E8",
+                      fontSize: "12px",
+                      fontFamily: "UberMoveText",
+                      color: "#333",
+                    })}
+                  >
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
+        </div>
 
+        {/* AI coach panel */}
+        <div className={css({ display: "grid", gap: "16px" })}>
           <div
             className={css({
               backgroundColor: "#FFF",
               borderRadius: "10px",
               border: "1px solid #E8E8E8",
-              padding: "20px",
+              padding: "16px",
             })}
           >
             <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "16px", marginBottom: "4px" })}>🤖 AI Manager Coach</div>
             <div className={css({ fontSize: "12px", color: "#777", fontFamily: "UberMoveText", marginBottom: "12px" })}>
-              Ask for themes, action plans, rep coaching talk tracks, or staff-meeting bullets.
+              Generate coaching themes, action plans, and talk tracks.
             </div>
 
             <div className={css({ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "12px" })}>
@@ -984,8 +1013,8 @@ export default function ManagerHub() {
                     fontFamily: "UberMoveText",
                     fontWeight: 600,
                     cursor: "pointer",
-                    border: `1px solid ${qp.urgent ? "#FFCDD2" : "#E8E8E8"}`,
-                    backgroundColor: qp.urgent ? "#FFF5F5" : "#FAFAFA",
+                    border: `1px solid ${qp.urgent ? "#FFD5D5" : "#E8E8E8"}`,
+                    backgroundColor: qp.urgent ? "#FFF4F4" : "#FAFAFA",
                     color: "#222",
                   })}
                 >
@@ -994,12 +1023,12 @@ export default function ManagerHub() {
               ))}
             </div>
 
-            <div className={css({ display: "flex", gap: "8px", marginBottom: "14px" })}>
+            <div className={css({ display: "flex", gap: "8px", marginBottom: "12px" })}>
               <div className={css({ flex: 1 })}>
                 <Textarea
                   value={aiInput}
                   onChange={(e) => setAiInput(e.target.value)}
-                  placeholder="Ask for coaching themes, action items, or talk tracks..."
+                  placeholder="Ask for themes, actions, or talk tracks..."
                   overrides={{
                     Input: {
                       style: {
@@ -1017,7 +1046,7 @@ export default function ManagerHub() {
             </div>
 
             {aiError && (
-              <div className={css({ color: "#E11900", fontSize: "12px", fontFamily: "UberMoveText", marginBottom: "8px" })}>{aiError}</div>
+              <div className={css({ color: "#B42318", fontSize: "12px", fontFamily: "UberMoveText", marginBottom: "8px" })}>{aiError}</div>
             )}
 
             {aiResponse ? (
@@ -1029,7 +1058,7 @@ export default function ManagerHub() {
                   color: "#333",
                   backgroundColor: "#F8F9FA",
                   borderRadius: "10px",
-                  padding: "16px",
+                  padding: "14px",
                 })}
               >
                 <ReactMarkdown>{aiResponse}</ReactMarkdown>
@@ -1043,105 +1072,47 @@ export default function ManagerHub() {
                   color: "#666",
                   backgroundColor: "#F8F9FA",
                   borderRadius: "10px",
-                  padding: "16px",
+                  padding: "14px",
                 })}
               >
-                Ask the coach to generate themes and a concrete action plan for the team.
+                Ask the coach to turn the team data into themes and a concrete action plan.
               </div>
             )}
           </div>
-        </div>
-      </div>
 
-      <div
-        className={css({
-          backgroundColor: "#FFF",
-          borderRadius: "10px",
-          border: "1px solid #E8E8E8",
-          padding: "20px",
-        })}
-      >
-        <div className={css({ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", marginBottom: "6px" })}>
-          <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "16px" })}>🚦 Priority coaching queue</div>
-          <div className={css({ fontSize: "12px", color: "#777", fontFamily: "UberMoveText" })}>Rank reps by urgency and coach from the top down.</div>
-        </div>
-
-        <div className={css({ display: "grid", gap: "10px" })}>
-          {repSignals.slice(0, 5).map((rep, idx) => (
-            <div
-              key={rep.name}
-              className={css({
-                display: "grid",
-                gridTemplateColumns: "160px minmax(0, 1fr) 160px",
-                gap: "12px",
-                alignItems: "center",
-                padding: "14px",
-                borderRadius: "10px",
-                border: "1px solid #E8E8E8",
-                backgroundColor: idx === 0 ? "#FFF8E1" : "#FAFAFA",
-              })}
-            >
-              <div>
-                <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "14px", marginBottom: "4px" })}>{rep.name}</div>
-                <div className={css({ fontSize: "11px", color: "#666", fontFamily: "UberMoveText" })}>
-                  {safePct0(rep.pct)}% to quota · {fmt(rep.gap)} gap
-                </div>
-              </div>
-
-              <div className={css({ display: "grid", gap: "6px" })}>
-                <div className={css({ display: "flex", gap: "8px", flexWrap: "wrap" })}>
-                  <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#E8F0FE", color: "#1565C0" })}>
-                    {rep.primary}
-                  </span>
-                  <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#F1F5F9", color: "#334155" })}>
-                    {rep.secondary}
-                  </span>
-                </div>
-                <div className={css({ fontSize: "12px", color: "#333", fontFamily: "UberMoveText", lineHeight: 1.5 })}>
-                  <b>Coach next:</b>{" "}
-                  {rep.primary === "Pipeline Creation"
-                    ? "Create new opportunities and clean stale ones."
-                    : rep.primary === "Post-Close Follow Through"
-                      ? "Force a clear live date and handoff ownership."
-                      : rep.primary === "Activity"
-                        ? "Increase call volume and tighten the talk track."
-                        : rep.primary === "Ramp / New Hire"
-                          ? "Reinforce daily habits and shadowing."
-                          : "Focus on deal quality and move next steps."}
-                </div>
-                <div className={css({ display: "flex", gap: "8px", flexWrap: "wrap" })}>
-                  <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#F8F9FA", color: "#444" })}>
-                    {rep.calls} calls
-                  </span>
-                  <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#F8F9FA", color: "#444" })}>
-                    {rep.createdLW} created LW
-                  </span>
-                  <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#F8F9FA", color: "#444" })}>
-                    {rep.stale} stale
-                  </span>
-                  <span className={css({ fontSize: "10px", padding: "3px 7px", borderRadius: "999px", backgroundColor: "#F8F9FA", color: "#444" })}>
-                    {safePct0(rep.pctNFT)}% CWnFT
-                  </span>
-                </div>
-              </div>
-
-              <div className={css({ display: "flex", justifyContent: "flex-end" })}>
-                <Button
-                  size={SIZE.compact}
-                  kind={KIND.secondary}
-                  onClick={() =>
-                    runPrompt(
-                      `Coach ${rep.name}. Their primary issue is ${rep.primary} and secondary issue is ${rep.secondary}. They are at ${safePct0(
-                        rep.pct
-                      )}% to quota, have ${rep.calls} calls, ${rep.stale} stale opps, and ${safePct0(rep.pctNFT)}% CWnFT. Give me 3 action items and a short talk track.`
-                    )
-                  }
+          <div
+            className={css({
+              backgroundColor: "#FFF",
+              borderRadius: "10px",
+              border: "1px solid #E8E8E8",
+              padding: "16px",
+            })}
+          >
+            <div className={css({ fontFamily: "UberMove", fontWeight: 700, fontSize: "15px", marginBottom: "8px" })}>What this hub should answer</div>
+            <div className={css({ display: "grid", gap: "8px" })}>
+              {[
+                "Who needs coaching first?",
+                "Why are they behind?",
+                "What action items should I assign today?",
+                "What is the team theme this week?",
+              ].map((item, idx) => (
+                <div
+                  key={idx}
+                  className={css({
+                    padding: "10px 11px",
+                    borderRadius: "8px",
+                    border: "1px solid #E8E8E8",
+                    backgroundColor: "#FAFAFA",
+                    fontSize: "12px",
+                    fontFamily: "UberMoveText",
+                    color: "#333",
+                  })}
                 >
-                  Coach with AI
-                </Button>
-              </div>
+                  {item}
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
         </div>
       </div>
     </div>
