@@ -6,7 +6,7 @@ const ALLOWED_CONTENT_TYPES = [
   "application/vnd.ms-excel",
   "text/csv",
   "application/csv",
-  "application/octet-stream", // some browsers use this for spreadsheet uploads
+  "application/octet-stream",
 ];
 
 function hasAllowedExtension(pathname: string): boolean {
