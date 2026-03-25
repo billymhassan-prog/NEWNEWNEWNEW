@@ -55,7 +55,7 @@ export default function UploadModal({ isOpen, onClose }: UploadModalProps) {
 
     try {
       const uploadedBlob = await upload(file.name, file, {
-        access: "private",
+        access: "Public",
         handleUploadUrl: "/api/upload",
         onUploadProgress: (event) => {
           setProgress(Math.round(event.percentage));
