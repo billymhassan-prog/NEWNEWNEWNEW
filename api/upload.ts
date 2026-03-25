@@ -1,62 +1,157 @@
-import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
+import { get, put } from "@vercel/blob";
+import * as XLSX from "xlsx";
 
 const PUBLIC_BLOB_TOKEN = process.env.PUBLIC_BLOB_READ_WRITE_TOKEN!;
 
-const ALLOWED_EXTENSIONS = [".xlsx", ".xls", ".csv"];
-const ALLOWED_CONTENT_TYPES = [
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-excel",
-  "text/csv",
-  "application/csv",
-  "application/octet-stream",
-];
+type AnalyzeRequestBody = {
+  pathname?: string;
+  fileName?: string;
+};
 
-function hasAllowedExtension(pathname: string): boolean {
-  const lower = pathname.toLowerCase();
-  return ALLOWED_EXTENSIONS.some((ext) => lower.endsWith(ext));
+type SheetData = {
+  rowCount: number;
+  columns: string[];
+  rows: Record<string, unknown>[];
+};
+
+function jsonError(message: string, status = 400) {
+  return Response.json({ success: false, error: message }, { status });
+}
+
+async function streamToArrayBuffer(
+  stream: ReadableStream<Uint8Array>
+): Promise<ArrayBuffer> {
+  return await new Response(stream).arrayBuffer();
+}
+
+function safeFileName(name: string | null | undefined): string | null {
+  if (!name) return null;
+  return name.split("/").pop() || name;
+}
+
+function parseWorkbook(arrayBuffer: ArrayBuffer): {
+  sheetNames: string[];
+  sheets: Record<string, SheetData>;
+  summary: Array<{
+    sheetName: string;
+    rowCount: number;
+    columns: string[];
+  }>;
+} {
+  const workbook = XLSX.read(arrayBuffer, { type: "array" });
+
+  const sheets: Record<string, SheetData> = {};
+  const summary: Array<{
+    sheetName: string;
+    rowCount: number;
+    columns: string[];
+  }> = [];
+
+  for (const sheetName of workbook.SheetNames) {
+    const worksheet = workbook.Sheets[sheetName];
+
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
+      defval: null,
+      raw: false,
+    });
+
+    const firstRow = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
+      header: 1,
+      raw: false,
+      blankrows: false,
+      sheetRows: 1,
+    });
+
+    const columns =
+      Array.isArray(firstRow[0]) && firstRow[0].length
+        ? firstRow[0].map((value) => String(value ?? "").trim()).filter(Boolean)
+        : [];
+
+    sheets[sheetName] = {
+      rowCount: rows.length,
+      columns,
+      rows,
+    };
+
+    summary.push({
+      sheetName,
+      rowCount: rows.length,
+      columns,
+    });
+  }
+
+  return {
+    sheetNames: workbook.SheetNames,
+    sheets,
+    summary,
+  };
 }
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as HandleUploadBody;
+    const body = (await request.json()) as AnalyzeRequestBody;
+    const { pathname, fileName } = body;
 
-    const jsonResponse = await handleUpload({
+    if (!pathname) {
+      return jsonError("pathname is required.");
+    }
+
+    const blobResult = await get(pathname, {
+      access: "public",
       token: PUBLIC_BLOB_TOKEN,
-      body,
-      request,
-      onBeforeGenerateToken: async (pathname) => {
-        if (!hasAllowedExtension(pathname)) {
-          throw new Error("Only .xlsx, .xls, and .csv files are allowed.");
-        }
-
-        return {
-          allowedContentTypes: ALLOWED_CONTENT_TYPES,
-          addRandomSuffix: true,
-          tokenPayload: JSON.stringify({
-            purpose: "team-dashboard-upload",
-          }),
-        };
-      },
-      onUploadCompleted: async ({ blob, tokenPayload }) => {
-        console.log("Upload completed:", {
-          pathname: blob.pathname,
-          size: blob.size,
-          contentType: blob.contentType,
-          tokenPayload,
-        });
-      },
     });
 
-    return Response.json(jsonResponse);
+    if (!blobResult || blobResult.statusCode !== 200 || !blobResult.stream) {
+      return jsonError("Uploaded file not found.", 404);
+    }
+
+    const arrayBuffer = await streamToArrayBuffer(blobResult.stream);
+    const parsed = parseWorkbook(arrayBuffer);
+
+    const version = new Date().toISOString();
+    const processedPathname = `processed/${version.replace(/[:.]/g, "-")}.json`;
+
+    const processedPayload = {
+      success: true,
+      version,
+      processedAt: version,
+      source: {
+        pathname,
+        fileName: safeFileName(fileName) ?? safeFileName(pathname),
+        size: blobResult.blob.size,
+        contentType: blobResult.blob.contentType,
+        uploadedAt: blobResult.blob.uploadedAt,
+      },
+      workbook: {
+        sheetNames: parsed.sheetNames,
+        totalSheets: parsed.sheetNames.length,
+      },
+      summary: parsed.summary,
+      sheets: parsed.sheets,
+    };
+
+    await put(processedPathname, JSON.stringify(processedPayload, null, 2), {
+      access: "public",
+      token: PUBLIC_BLOB_TOKEN,
+      addRandomSuffix: false,
+      contentType: "application/json",
+    });
+
+    return Response.json({
+      success: true,
+      version,
+      processedPathname,
+      summary: parsed.summary,
+    });
   } catch (error: any) {
-    console.error("UPLOAD TOKEN ERROR:", error);
+    console.error("ANALYZE ERROR:", error);
 
     return Response.json(
       {
         success: false,
-        error: error?.message || "Could not start upload.",
+        error: error?.message || "Analyze failed.",
       },
-      { status: 400 }
+      { status: 500 }
     );
   }
 }
