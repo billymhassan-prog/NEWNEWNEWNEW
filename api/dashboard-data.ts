@@ -16,8 +16,8 @@ function jsonError(message: string, status = 400) {
   );
 }
 
-async function readPrivateJson(pathname: string) {
-  const result = await get(pathname, { access: "private" });
+async function readPublicJson(pathname: string) {
+  const result = await get(pathname, { access: "Public" });
 
   if (!result || result.statusCode !== 200 || !result.stream) {
     return null;
@@ -44,7 +44,7 @@ export async function GET() {
       );
     })[0];
 
-    const data = await readPrivateJson(newest.pathname);
+    const data = await readPublicJson(newest.pathname);
 
     if (!data) {
       return jsonError("Could not read the latest processed dataset.", 500);
