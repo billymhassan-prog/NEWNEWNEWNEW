@@ -74,20 +74,28 @@ export default function UploadModal({
       });
 
       const analyzeResp = await fetch("/api/analyze", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          pathname: uploadedBlob.pathname,
-          fileName: file.name,
-        }),
-      });
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    pathname: uploadedBlob.pathname,
+    fileName: file.name,
+  }),
+});
 
-      const analyzeJson = await analyzeResp.json();
+const analyzeText = await analyzeResp.text();
 
-      if (!analyzeResp.ok || !analyzeJson.success) {
-        throw new Error(analyzeJson.error || "Analyze failed");
+let analyzeJson: any;
+try {
+  analyzeJson = JSON.parse(analyzeText);
+} catch {
+  throw new Error(analyzeText || `Analyze failed (${analyzeResp.status})`);
+}
+
+if (!analyzeResp.ok || !analyzeJson.success) {
+  throw new Error(analyzeJson.error || "Analyze failed");
+}
       }
 
       setUploaded(true);
