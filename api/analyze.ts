@@ -1,4 +1,4 @@
-import { list, put } from "@vercel/blob";
+import { get, put } from "@vercel/blob";
 import * as XLSX from "xlsx";
 
 const _BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN!;
