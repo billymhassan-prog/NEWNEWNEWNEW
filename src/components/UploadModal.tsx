@@ -43,11 +43,14 @@ export default function UploadModal({
       setUploadError(null);
       setProgress(null);
     } else {
+      setFile(null);
+      setUploaded(false);
       setUploadError("Please choose a .xlsx, .xls, or .csv file.");
+      setProgress(null);
     }
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setDragOver(false);
 
@@ -57,7 +60,7 @@ export default function UploadModal({
   };
 
   const handleUpload = async () => {
-    if (!file) return;
+    if (!file || uploading) return;
 
     setUploading(true);
     setUploaded(false);
@@ -74,28 +77,27 @@ export default function UploadModal({
       });
 
       const analyzeResp = await fetch("/api/analyze", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    pathname: uploadedBlob.pathname,
-    fileName: file.name,
-  }),
-});
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          pathname: uploadedBlob.pathname,
+          fileName: file.name,
+        }),
+      });
 
-const analyzeText = await analyzeResp.text();
+      const analyzeText = await analyzeResp.text();
 
-let analyzeJson: any;
-try {
-  analyzeJson = JSON.parse(analyzeText);
-} catch {
-  throw new Error(analyzeText || `Analyze failed (${analyzeResp.status})`);
-}
+      let analyzeJson: any;
+      try {
+        analyzeJson = JSON.parse(analyzeText);
+      } catch {
+        throw new Error(analyzeText || `Analyze failed (${analyzeResp.status})`);
+      }
 
-if (!analyzeResp.ok || !analyzeJson.success) {
-  throw new Error(analyzeJson.error || "Analyze failed");
-}
+      if (!analyzeResp.ok || !analyzeJson.success) {
+        throw new Error(analyzeJson.error || "Analyze failed");
       }
 
       setUploaded(true);
@@ -121,6 +123,10 @@ if (!analyzeResp.ok || !analyzeJson.success) {
     setUploading(false);
     setUploadError(null);
     setProgress(null);
+    setDragOver(false);
+    if (inputRef.current) {
+      inputRef.current.value = "";
+    }
     onClose();
   };
 
@@ -266,6 +272,10 @@ if (!analyzeResp.ok || !analyzeJson.success) {
                   setFile(null);
                   setUploadError(null);
                   setProgress(null);
+                  setUploaded(false);
+                  if (inputRef.current) {
+                    inputRef.current.value = "";
+                  }
                 }}
               >
                 ✕
@@ -309,6 +319,8 @@ if (!analyzeResp.ok || !analyzeJson.success) {
                   color: "#E11900",
                   marginTop: "8px",
                   fontSize: "13px",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
                 })}
               >
                 {uploadError}
