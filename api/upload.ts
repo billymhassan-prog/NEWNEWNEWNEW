@@ -1,6 +1,6 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 
-const PUBLIC_BLOB_TOKEN = process.env.PUBLIC_BLOB_READ_WRITE_TOKEN!;
+const PUBLIC_BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN!;
 
 const ALLOWED_EXTENSIONS = [".xlsx", ".xls", ".csv"];
 const ALLOWED_CONTENT_TYPES = [
