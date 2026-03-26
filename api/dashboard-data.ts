@@ -1,6 +1,6 @@
 import { get, list } from "@vercel/blob";
 
-const PUBLIC_BLOB_TOKEN = process.env.PUBLIC_BLOB_READ_WRITE_TOKEN!;
+const PUBLIC_BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN!;
 
 function jsonError(message: string, status = 400) {
   return new Response(
@@ -35,7 +35,7 @@ export async function GET() {
   try {
     const { blobs } = await list({
       prefix: "processed/",
-      token: PUBLIC_BLOB_TOKEN,
+      token: _BLOB_TOKEN,
     });
 
     const candidates = blobs.filter((blob) => blob.pathname.endsWith(".json"));
