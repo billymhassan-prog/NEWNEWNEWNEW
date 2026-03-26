@@ -1,7 +1,7 @@
 import { get, put } from "@vercel/blob";
 import * as XLSX from "xlsx";
 
-const PUBLIC_BLOB_TOKEN = process.env.PUBLIC_BLOB_READ_WRITE_TOKEN!;
+const _BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN!;
 
 type AnalyzeRequestBody = {
   pathname?: string;
@@ -96,8 +96,8 @@ function parseWorkbook(arrayBuffer: ArrayBuffer): {
 
 export async function POST(request: Request) {
   try {
-    if (!PUBLIC_BLOB_TOKEN) {
-      return jsonError("PUBLIC_BLOB_READ_WRITE_TOKEN is missing.", 500);
+    if (!_BLOB_TOKEN) {
+      return jsonError("_BLOB_READ_WRITE_TOKEN is missing.", 500);
     }
 
     const body = (await request.json()) as AnalyzeRequestBody;
@@ -108,8 +108,8 @@ export async function POST(request: Request) {
     }
 
     const blobResult = await get(pathname, {
-      access: "public",
-      token: PUBLIC_BLOB_TOKEN,
+      access: "",
+      token: _BLOB_TOKEN,
     });
 
     if (!blobResult || blobResult.statusCode !== 200 || !blobResult.stream) {
@@ -142,8 +142,8 @@ export async function POST(request: Request) {
     };
 
     await put(processedPathname, JSON.stringify(processedPayload), {
-      access: "public",
-      token: PUBLIC_BLOB_TOKEN,
+      access: "",
+      token: _BLOB_TOKEN,
       addRandomSuffix: false,
       contentType: "application/json",
     });
