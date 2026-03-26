@@ -105,7 +105,10 @@ export default function UploadModal({
 
       window.dispatchEvent(
         new CustomEvent("data:updated", {
-          detail: { version: analyzeJson.version },
+          detail: {
+            version: analyzeJson.version,
+            processedPathname: analyzeJson.processedPathname,
+          },
         })
       );
     } catch (err: any) {
